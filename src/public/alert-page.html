@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Emergency Alert</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .card {
+      max-width: 420px;
+      margin: 24px auto;
+      background: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 8px; color: #e60000; }
+    h2 { font-size: 1.1rem; margin: 0 0 8px; color: #1a1a1a; }
+    p.sub { margin: 0 0 16px; color: #666; font-size: 0.9rem; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; margin-top: 12px; }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #ddd;
+      background: #fdfdfd;
+      border-radius: 12px;
+      font-size: 1rem;
+      margin-bottom: 4px;
+    }
+    input:disabled { background: #f0f0f0; color: #888; }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: #e60000;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .err { color: #c00; font-size: 0.85rem; margin-top: 2px; }
+    .owner { margin: 16px 0; padding: 12px; background: #fafafa; border-radius: 12px; }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .row:last-child { border-bottom: none; }
+    .call {
+      padding: 8px 14px;
+      background: #fff;
+      border: 2px solid #e60000;
+      color: #e60000;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      width: auto;
+      margin-top: 0;
+    }
+    .hidden { display: none !important; }
+    .mb { margin-bottom: 12px; }
+    .text-center { text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card" id="step-loading">
+    <p class="text-center">Loading...</p>
+  </div>
+
+  <div class="card hidden" id="step-expired">
+    <h1>Your scanner got expired.</h1>
+    <p class="sub">Please activate it as soon as possible to save your life.</p>
+  </div>
+
+  <div class="card hidden" id="step-verify">
+    <h1>Verify vehicle</h1>
+    <p class="sub">Enter the vehicle number shown on this QR to view masked emergency contacts.</p>
+    <div class="err hidden" id="verify-err"></div>
+    <label for="vehicle">Vehicle number</label>
+    <input id="vehicle" placeholder="e.g. MH12AB1234" autocomplete="off" />
+    <label for="caller">Your mobile number (for callback)</label>
+    <input id="caller" placeholder="10-digit mobile" inputmode="numeric" />
+    <button type="button" id="btn-verify">Continue</button>
+  </div>
+
+  <div class="card hidden" id="step-result">
+    <h1>Emergency contacts</h1>
+    <p class="sub">Masked details. Tap Call to connect via secure bridge.</p>
+    <div class="owner">
+      <strong>Owner</strong>
+      <div id="owner-line"></div>
+    </div>
+    <div id="family-list"></div>
+  </div>
+
+  <div class="card hidden" id="step-link-qr">
+    <h1>Link QR with new User</h1>
+    <p class="sub">This QR code is unregistered. Please enter your mobile number to begin.</p>
+    <div class="err hidden" id="link-err"></div>
+    <label for="link-mobile">Mobile Number</label>
+    <input id="link-mobile" placeholder="10-digit mobile" inputmode="numeric" />
+    <button type="button" id="btn-link-send-otp">Send OTP</button>
+  </div>
+
+  <div class="card hidden" id="step-link-otp">
+    <h1>Verify OTP</h1>
+    <p class="sub">Enter OTP sent to your mobile. (Default: 1234)</p>
+    <div class="err hidden" id="otp-err"></div>
+    <label for="link-otp">OTP</label>
+    <input id="link-otp" placeholder="1234" inputmode="numeric" />
+    <button type="button" id="btn-verify-otp">Verify</button>
+  </div>
+
+  <div class="card hidden" id="step-register">
+    <h1>Register & Activate QR</h1>
+    <div class="err hidden" id="reg-form-err"></div>
+    
+    <label>Mobile Number</label>
+    <input id="reg-mobile" disabled />
+
+    <label>Full Name *</label>
+    <input id="reg-name" placeholder="Name" />
+
+    <label>Email ID (Optional)</label>
+    <input id="reg-email" placeholder="Email" type="email" />
+
+    <label>Vehicle Number *</label>
+    <input id="reg-vehicle" placeholder="MH12AB1234" />
+    <div class="err hidden" id="reg-vehicle-err"></div>
+
+    <label>Referral Code *</label>
+    <input id="reg-referral" placeholder="Enter referral code" />
+
+    <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;" />
+    <h2>Family Contact (At least 1 required)</h2>
+
+    <label>Contact Name *</label>
+    <input id="reg-fam-name" placeholder="Name" />
+
+    <label>Contact Phone *</label>
+    <input id="reg-fam-phone" placeholder="10-digit mobile" inputmode="numeric" />
+
+    <label>Relationship *</label>
+    <input id="reg-fam-rel" placeholder="e.g. Father, Mother, Brother" />
+
+    <button type="button" id="btn-activate" disabled>Activate QR</button>
+  </div>
+
+  <div class="card hidden" id="step-success">
+    <h1>Success</h1>
+    <p class="sub">QR has been activated successfully!</p>
+    <button type="button" onclick="location.reload()">Reload</button>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let localStream;
+    let peerConnection;
+    let currentCallId = null;
+    let activeCallBtn = null;
+    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const remoteAudio = document.createElement('audio');
+    remoteAudio.autoplay = true;
+    document.body.appendChild(remoteAudio);
+    const UNIQUE_ID = "__UNIQUE_ID__";
+    const base = window.location.origin;
+
+    const els = {
+      loading: document.getElementById('step-loading'),
+      expired: document.getElementById('step-expired'),
+      verify: document.getElementById('step-verify'),
+      result: document.getElementById('step-result'),
+      linkQr: document.getElementById('step-link-qr'),
+      linkOtp: document.getElementById('step-link-otp'),
+      register: document.getElementById('step-register'),
+      success: document.getElementById('step-success'),
+    };
+
+    function showStep(stepName) {
+      Object.keys(els).forEach(k => els[k].classList.add('hidden'));
+      els[stepName].classList.remove('hidden');
+    }
+
+    function showErr(el, msg) {
+      el.textContent = msg || "";
+      el.classList.toggle("hidden", !msg);
+    }
+
+    // Checking status on load
+    async function init() {
+      try {
+        const res = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/status");
+        const data = await res.json();
+        
+        if (!data.exists) {
+          showStep('linkQr');
+        } else if (data.expired) {
+          showStep('expired');
+        } else {
+          showStep('verify');
+        }
+      } catch (e) {
+        showErr(document.getElementById('verify-err'), 'Failed to load status');
+        showStep('verify'); // fallback
+      }
+    }
+
+    init();
+
+    // -----------------------------------------------------
+    // Existing Flow (Verify Vehicle for existing QR)
+    // -----------------------------------------------------
+    document.getElementById("btn-verify").onclick = async () => {
+      const vehicle = document.getElementById("vehicle").value.trim();
+      const caller = document.getElementById("caller").value.trim().replace(/\D/g, "");
+      const errEl = document.getElementById("verify-err");
+      showErr(errEl, "");
+      if (vehicle.length < 4) return showErr(errEl, "Enter vehicle number");
+      if (caller.length < 10) return showErr(errEl, "Enter your 10-digit mobile for call masking");
+      
+      const btn = document.getElementById("btn-verify");
+      btn.disabled = true;
+      try {
+        const res = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vehicle_number: vehicle }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showErr(errEl, data.error || "Verification failed");
+          btn.disabled = false;
+          return;
+        }
+        window.__verifiedVehicle = vehicle;
+        window.__caller = caller;
+        showStep('result');
+        
+        document.getElementById("owner-line").innerHTML =
+          "<div>Name: " + data.owner.nameMasked + "</div>" +
+          "<div>Mobile: " + data.owner.mobileMasked + "</div>" +
+          '<div style="margin-top:8px"><button type="button" class="call" data-target="owner">Call owner</button></div>';
+
+        const fam = document.getElementById("family-list");
+        fam.innerHTML = "<strong>Family</strong>";
+        (data.family || []).forEach((f) => {
+          const div = document.createElement("div");
+          div.className = "row";
+          div.innerHTML =
+            "<span>" + f.relation + " — " + f.phoneMasked + "</span>" +
+            '<button type="button" class="call" data-target="family" data-id="' + f.id + '">Call</button>';
+          fam.appendChild(div);
+        });
+
+        document.querySelectorAll(".call").forEach(b => b.addEventListener("click", onCall));
+      } catch (e) {
+        showErr(errEl, "Network error");
+      }
+      btn.disabled = false;
+    };
+
+    async function onCall(ev) {
+      const btn = ev.currentTarget;
+      if (btn.innerText === "End Call") {
+        endCall();
+        return;
+      }
+      if (peerConnection) {
+        alert("A call is already in progress.");
+        return;
+      }
+
+      const target = btn.getAttribute("data-target");
+      const familyId = btn.getAttribute("data-id");
+      btn.disabled = true;
+      btn.innerText = "Initiating...";
+      activeCallBtn = btn;
+      
+      try {
+        const body = {
+          uniqueId: UNIQUE_ID,
+          target,
+        };
+        if (target === "family") body.family_detail_id = parseInt(familyId, 10);
+        
+        const res = await fetch(base + "/alert/create-call", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        
+        if (!data.ok) {
+           alert(data.error || "Failed");
+           resetBtn();
+           return;
+        }
+
+        currentCallId = data.callId;
+        console.log("Join Link: " + data.joinLink);
+        alert("SMS Sent! Receiver link: " + data.joinLink); 
+
+        btn.innerText = "Waiting for receiver...";
+        
+        socket.emit('join-call', currentCallId);
+
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        peerConnection = new RTCPeerConnection(configuration);
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+        peerConnection.onicecandidate = event => {
+          if (event.candidate) {
+            socket.emit('ice-candidate', { callId: currentCallId, candidate: event.candidate });
+          }
+        };
+
+        peerConnection.ontrack = event => {
+          remoteAudio.srcObject = event.streams[0];
+        };
+
+      } catch (e) {
+        console.error("Call error", e);
+        alert("Failed to start call. Microphone permission denied?");
+        endCall();
+      }
+    }
+
+    socket.on('receiver-ready', async (data) => {
+      if (data.callId !== currentCallId || !peerConnection) return;
+      activeCallBtn.innerText = "Connecting...";
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', { callId: currentCallId, offer });
+      } catch (e) { console.error("Offer error", e); }
+    });
+
+    socket.on('answer', async (data) => {
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        activeCallBtn.innerText = "End Call";
+        activeCallBtn.style.backgroundColor = "#dc3545";
+        activeCallBtn.style.color = "#fff";
+        activeCallBtn.style.borderColor = "#dc3545";
+        activeCallBtn.disabled = false;
+      } catch (e) { console.error("Answer error", e); }
+    });
+
+    socket.on('ice-candidate', async (data) => {
+      if (peerConnection) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) { console.error('ICE error', e); }
+      }
+    });
+
+    socket.on('call-ended', () => {
+      endCall();
+    });
+
+    function resetBtn() {
+      if (activeCallBtn) {
+        activeCallBtn.innerText = activeCallBtn.getAttribute("data-target") === "owner" ? "Call owner" : "Call";
+        activeCallBtn.style.backgroundColor = "";
+        activeCallBtn.style.color = "";
+        activeCallBtn.style.borderColor = "";
+        activeCallBtn.disabled = false;
+        activeCallBtn = null;
+      }
+    }
+
+    function endCall() {
+      if (currentCallId) {
+        socket.emit('end-call', { callId: currentCallId });
+      }
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      currentCallId = null;
+      resetBtn();
+    }
+
+    // -----------------------------------------------------
+    // New Flow (Link QR)
+    // -----------------------------------------------------
+    document.getElementById("btn-link-send-otp").onclick = () => {
+      const mob = document.getElementById("link-mobile").value.trim().replace(/\D/g, "");
+      const errEl = document.getElementById("link-err");
+      showErr(errEl, "");
+      if (mob.length !== 10) return showErr(errEl, "Enter exactly 10 digits");
+      
+      window.__regMobile = mob;
+      showStep('linkOtp');
+    };
+
+    document.getElementById("btn-verify-otp").onclick = () => {
+      const otp = document.getElementById("link-otp").value.trim();
+      const errEl = document.getElementById("otp-err");
+      showErr(errEl, "");
+      if (otp !== "1234") return showErr(errEl, "Invalid OTP. Use 1234");
+      
+      document.getElementById("reg-mobile").value = window.__regMobile;
+      showStep('register');
+      checkForm();
+    };
+
+    // Form Validation logic
+    const regInputs = ['reg-name', 'reg-vehicle', 'reg-referral', 'reg-fam-name', 'reg-fam-phone', 'reg-fam-rel'];
+    regInputs.forEach(id => {
+      document.getElementById(id).addEventListener('input', checkForm);
+    });
+
+    function checkForm() {
+      const vName = document.getElementById('reg-name').value.trim();
+      const vVehicle = document.getElementById('reg-vehicle').value.trim().toUpperCase();
+      const vRef = document.getElementById('reg-referral').value.trim();
+      const vFamName = document.getElementById('reg-fam-name').value.trim();
+      const vFamPhone = document.getElementById('reg-fam-phone').value.trim();
+      const vFamRel = document.getElementById('reg-fam-rel').value.trim();
+
+      let valid = true;
+      if (!vName) valid = false;
+      if (!vRef) valid = false;
+      if (!vFamName || !vFamRel || vFamPhone.length !== 10) valid = false;
+
+      const vehicleRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/;
+      const vehErr = document.getElementById('reg-vehicle-err');
+      if (!vVehicle) {
+        valid = false;
+        showErr(vehErr, "");
+      } else if (!vehicleRegex.test(vVehicle)) {
+        valid = false;
+        showErr(vehErr, "Invalid Vehicle Number (e.g. MH12AB1234)");
+      } else {
+        showErr(vehErr, "");
+      }
+
+      document.getElementById('btn-activate').disabled = !valid;
+    }
+
+    document.getElementById('btn-activate').onclick = async () => {
+      const btn = document.getElementById('btn-activate');
+      btn.disabled = true;
+      const errEl = document.getElementById('reg-form-err');
+      showErr(errEl, "");
+
+      const payload = {
+        mobile: window.__regMobile,
+        name: document.getElementById('reg-name').value.trim(),
+        email: document.getElementById('reg-email').value.trim(),
+        vehicle_number: document.getElementById('reg-vehicle').value.trim().toUpperCase(),
+        referralCode: document.getElementById('reg-referral').value.trim(),
+        family: [{
+          name: document.getElementById('reg-fam-name').value.trim(),
+          phone: document.getElementById('reg-fam-phone').value.trim(),
+          relation: document.getElementById('reg-fam-rel').value.trim()
+        }]
+      };
+
+      try {
+        const res = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/manual_activate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showErr(errEl, data.error || "Activation failed");
+          btn.disabled = false;
+          return;
+        }
+        showStep('success');
+      } catch (e) {
+        showErr(errEl, "Network error");
+        btn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

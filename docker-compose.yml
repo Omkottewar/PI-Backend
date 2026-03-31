@@ -1,0 +1,27 @@
+# Local PostgreSQL matching .env.example:
+# DATABASE_URL=postgresql://postgres:postgres@localhost:5432/emergency_alert
+#
+# Usage (from backend folder):
+#   docker compose up -d
+#   npm run migrate
+#   npm start
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: emergency_alert
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL", "pg_isready -U postgres -d emergency_alert"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+emergency_alert_pg:
