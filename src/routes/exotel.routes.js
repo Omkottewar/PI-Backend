@@ -11,10 +11,10 @@ router.get('/lookup', (req, res) => {
   console.log('[exotel/lookup]', { CallSid, CallFrom, digits });
 
   if (String(digits || '').trim() === TRIGGER_DIGITS) {
-    return res.type('text/plain').send(HARDCODED_NUMBER);
+    return res.json({ number: HARDCODED_NUMBER });
   }
 
-  return res.status(404).type('text/plain').send('');
+  return res.status(404).json({ number: null });
 });
 
 export default router;
