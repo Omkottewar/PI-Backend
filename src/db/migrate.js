@@ -15,7 +15,11 @@ async function run() {
     console.error('DATABASE_URL missing');
     process.exit(1);
   }
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const isSupabase = /supabase\.(co|com)/i.test(databaseUrl);
+  const client = new pg.Client({
+    connectionString: databaseUrl,
+    ssl: isSupabase ? { rejectUnauthorized: false } : false,
+  });
   await client.connect();
   try {
     const files = fs

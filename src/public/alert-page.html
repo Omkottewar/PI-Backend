@@ -7,77 +7,103 @@
   <style>
     * { box-sizing: border-box; }
     body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       margin: 0;
-      background: #f5f5f5;
-      color: #1a1a1a;
+      background: #0A0F1D; /* Premium deep navy background */
+      color: #F8FAFC; /* Off-white text */
       min-height: 100vh;
       padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .card {
       max-width: 420px;
+      width: 100%;
       margin: 24px auto;
-      background: #fff;
-      border-radius: 18px;
-      padding: 20px;
-      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      background: #161F33; /* Deep navy card surface */
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     }
-    h1 { font-size: 1.25rem; margin: 0 0 8px; color: #e60000; }
-    h2 { font-size: 1.1rem; margin: 0 0 8px; color: #1a1a1a; }
-    p.sub { margin: 0 0 16px; color: #666; font-size: 0.9rem; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; margin-top: 12px; }
-    input {
+    h1 { font-size: 1.4rem; margin: 0 0 8px; color: #FF7A00; font-weight: 800; } /* Bronze/Orange Accent */
+    h2 { font-size: 1.15rem; margin: 0 0 12px; color: #F8FAFC; font-weight: 700; }
+    p.sub { margin: 0 0 20px; color: #94A3B8; font-size: 0.9rem; line-height: 1.4; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; margin-top: 14px; color: #94A3B8; }
+    input, select {
       width: 100%;
       padding: 12px 14px;
-      border: 1px solid #ddd;
-      background: #fdfdfd;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #1E293B; /* Charcoal-slate input */
+      color: #F8FAFC;
       border-radius: 12px;
-      font-size: 1rem;
+      font-size: 1.0rem;
       margin-bottom: 4px;
+      transition: all 0.2s;
     }
-    input:disabled { background: #f0f0f0; color: #888; }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #FF7A00;
+      box-shadow: 0 0 0 2px rgba(255, 122, 0, 0.2);
+    }
+    input:disabled { background: #0F172A; color: #64748B; }
     button {
       width: 100%;
       padding: 14px;
-      background: #e60000;
+      background: #FF7A00; /* Bronze/Orange */
       color: #fff;
       border: none;
       border-radius: 12px;
       font-weight: 700;
       font-size: 1rem;
       cursor: pointer;
-      margin-top: 16px;
+      margin-top: 20px;
+      transition: all 0.2s;
     }
+    button:hover { background: #E56B1A; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .err { color: #c00; font-size: 0.85rem; margin-top: 2px; }
-    .owner { margin: 16px 0; padding: 12px; background: #fafafa; border-radius: 12px; }
+    .err { color: #F87171; font-size: 0.85rem; margin-top: 2px; }
+    .owner { margin: 20px 0; padding: 16px; background: #1E293B; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.05); }
     .row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 0;
-      border-bottom: 1px solid #eee;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
     .row:last-child { border-bottom: none; }
     .call {
-      padding: 8px 14px;
-      background: #fff;
-      border: 2px solid #e60000;
-      color: #e60000;
+      padding: 8px 16px;
+      background: transparent;
+      border: 2px solid #FF7A00;
+      color: #FF7A00;
       border-radius: 10px;
       font-weight: 600;
       cursor: pointer;
       width: auto;
       margin-top: 0;
+      transition: all 0.2s;
     }
+    .call:hover { background: #FF7A00; color: #fff; }
     .hidden { display: none !important; }
     .mb { margin-bottom: 12px; }
     .text-center { text-align: center; }
+    hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.08); margin: 24px 0; }
   </style>
 </head>
 <body>
+  <!-- Validation Modal -->
+  <div id="validation-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 10000; font-family: 'Inter', sans-serif;">
+    <div style="background: #161F33; padding: 24px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); width: 90%; max-width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); text-align: center;">
+      <h3 style="margin-top: 0; margin-bottom: 12px; color: #FF7A00; font-weight:800;">Validation Error</h3>
+      <p id="validation-modal-msg" style="margin-bottom: 20px; color: #94A3B8; font-size: 1rem; line-height: 1.4;"></p>
+      <button type="button" onclick="document.getElementById('validation-modal').style.display='none'" style="width: 100%; background: #FF7A00; color: #fff; padding: 12px; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 1rem; margin-top: 0;">OK</button>
+    </div>
+  </div>
+
   <div class="card" id="step-loading">
-    <p class="text-center">Loading...</p>
+    <p class="text-center" style="color: #94A3B8;">Loading...</p>
   </div>
 
   <div class="card hidden" id="step-expired">
@@ -91,8 +117,6 @@
     <div class="err hidden" id="verify-err"></div>
     <label for="vehicle">Vehicle number</label>
     <input id="vehicle" placeholder="e.g. MH12AB1234" autocomplete="off" />
-    <label for="caller">Your mobile number (for callback)</label>
-    <input id="caller" placeholder="10-digit mobile" inputmode="numeric" />
     <button type="button" id="btn-verify">Continue</button>
   </div>
 
@@ -100,10 +124,10 @@
     <h1>Emergency contacts</h1>
     <p class="sub">Masked details. Tap Call to connect via secure bridge.</p>
     <div class="owner">
-      <strong>Owner</strong>
-      <div id="owner-line"></div>
+      <strong style="color: #FF7A00;">Owner</strong>
+      <div id="owner-line" style="margin-top: 8px; line-height: 1.5; color: #F8FAFC;"></div>
     </div>
-    <div id="family-list"></div>
+    <div id="family-list" style="color: #F8FAFC;"></div>
   </div>
 
   <div class="card hidden" id="step-link-qr">
@@ -112,16 +136,7 @@
     <div class="err hidden" id="link-err"></div>
     <label for="link-mobile">Mobile Number</label>
     <input id="link-mobile" placeholder="10-digit mobile" inputmode="numeric" />
-    <button type="button" id="btn-link-send-otp">Send OTP</button>
-  </div>
-
-  <div class="card hidden" id="step-link-otp">
-    <h1>Verify OTP</h1>
-    <p class="sub">Enter OTP sent to your mobile. (Default: 1234)</p>
-    <div class="err hidden" id="otp-err"></div>
-    <label for="link-otp">OTP</label>
-    <input id="link-otp" placeholder="1234" inputmode="numeric" />
-    <button type="button" id="btn-verify-otp">Verify</button>
+    <button type="button" id="btn-link-continue">Continue</button>
   </div>
 
   <div class="card hidden" id="step-register">
@@ -144,38 +159,36 @@
     <label>Referral Code *</label>
     <input id="reg-referral" placeholder="Enter referral code" />
 
-    <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;" />
-    <h2>Family Contact (At least 1 required)</h2>
+    <hr />
+    <h2 style="color: #FF7A00;">Family Contacts (Max 5)</h2>
+    <div id="family-contacts-container">
+      <div class="family-contact-group">
+        <label>Contact Name *</label>
+        <input class="reg-fam-name" placeholder="Name" />
+        <label>Contact Phone *</label>
+        <input class="reg-fam-phone" placeholder="10-digit mobile" inputmode="numeric" />
+        <label>Relationship *</label>
+        <select class="reg-fam-rel">
+          <option value="">Select Relation</option>
+          <option value="Father">Father</option>
+          <option value="Mother">Mother</option>
+          <option value="Sister">Sister</option>
+          <option value="Brother">Brother</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    <button type="button" id="btn-add-contact" style="background:#1E293B; border: 1px solid rgba(255,255,255,0.08); margin-bottom:12px;">+ Add Contact</button>
 
-    <label>Contact Name *</label>
-    <input id="reg-fam-name" placeholder="Name" />
-
-    <label>Contact Phone *</label>
-    <input id="reg-fam-phone" placeholder="10-digit mobile" inputmode="numeric" />
-
-    <label>Relationship *</label>
-    <input id="reg-fam-rel" placeholder="e.g. Father, Mother, Brother" />
-
-    <button type="button" id="btn-activate" disabled>Activate QR</button>
+    <button type="button" id="btn-activate">Activate QR</button>
   </div>
 
   <div class="card hidden" id="step-success">
     <h1>Success</h1>
-    <p class="sub">QR has been activated successfully!</p>
-    <button type="button" onclick="location.reload()">Reload</button>
+    <p class="sub">QR has been activated successfully! Redirecting you to login...</p>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
-    let localStream;
-    let peerConnection;
-    let currentCallId = null;
-    let activeCallBtn = null;
-    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    const remoteAudio = document.createElement('audio');
-    remoteAudio.autoplay = true;
-    document.body.appendChild(remoteAudio);
     const UNIQUE_ID = "__UNIQUE_ID__";
     const base = window.location.origin;
 
@@ -185,7 +198,6 @@
       verify: document.getElementById('step-verify'),
       result: document.getElementById('step-result'),
       linkQr: document.getElementById('step-link-qr'),
-      linkOtp: document.getElementById('step-link-otp'),
       register: document.getElementById('step-register'),
       success: document.getElementById('step-success'),
     };
@@ -195,9 +207,9 @@
       els[stepName].classList.remove('hidden');
     }
 
-    function showErr(el, msg) {
-      el.textContent = msg || "";
-      el.classList.toggle("hidden", !msg);
+    function showModal(msg) {
+      document.getElementById('validation-modal-msg').innerText = msg;
+      document.getElementById('validation-modal').style.display = 'flex';
     }
 
     // Checking status on load
@@ -214,7 +226,7 @@
           showStep('verify');
         }
       } catch (e) {
-        showErr(document.getElementById('verify-err'), 'Failed to load status');
+        showModal('Failed to load status');
         showStep('verify'); // fallback
       }
     }
@@ -222,15 +234,11 @@
     init();
 
     // -----------------------------------------------------
-    // Existing Flow (Verify Vehicle for existing QR)
+    // Verification Flow (Verify Vehicle for existing QR)
     // -----------------------------------------------------
     document.getElementById("btn-verify").onclick = async () => {
       const vehicle = document.getElementById("vehicle").value.trim();
-      const caller = document.getElementById("caller").value.trim().replace(/\D/g, "");
-      const errEl = document.getElementById("verify-err");
-      showErr(errEl, "");
-      if (vehicle.length < 4) return showErr(errEl, "Enter vehicle number");
-      if (caller.length < 10) return showErr(errEl, "Enter your 10-digit mobile for call masking");
+      if (vehicle.length < 4) return showModal("Enter a valid vehicle number");
       
       const btn = document.getElementById("btn-verify");
       btn.disabled = true;
@@ -242,21 +250,20 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showErr(errEl, data.error || "Verification failed");
+          showModal(data.error || "Verification failed");
           btn.disabled = false;
           return;
         }
         window.__verifiedVehicle = vehicle;
-        window.__caller = caller;
         showStep('result');
         
         document.getElementById("owner-line").innerHTML =
           "<div>Name: " + data.owner.nameMasked + "</div>" +
           "<div>Mobile: " + data.owner.mobileMasked + "</div>" +
-          '<div style="margin-top:8px"><button type="button" class="call" data-target="owner">Call owner</button></div>';
+          '<div style="margin-top:12px"><button type="button" class="call" data-target="owner">Call owner</button></div>';
 
         const fam = document.getElementById("family-list");
-        fam.innerHTML = "<strong>Family</strong>";
+        fam.innerHTML = "<strong style='color:#FF7A00; display:block; margin: 16px 0 8px;'>Family</strong>";
         (data.family || []).forEach((f) => {
           const div = document.createElement("div");
           div.className = "row";
@@ -268,32 +275,24 @@
 
         document.querySelectorAll(".call").forEach(b => b.addEventListener("click", onCall));
       } catch (e) {
-        showErr(errEl, "Network error");
+        showModal("Network error");
       }
       btn.disabled = false;
     };
 
     async function onCall(ev) {
       const btn = ev.currentTarget;
-      if (btn.innerText === "End Call") {
-        endCall();
-        return;
-      }
-      if (peerConnection) {
-        alert("A call is already in progress.");
-        return;
-      }
-
       const target = btn.getAttribute("data-target");
       const familyId = btn.getAttribute("data-id");
+      
       btn.disabled = true;
       btn.innerText = "Initiating...";
-      activeCallBtn = btn;
       
       try {
         const body = {
           uniqueId: UNIQUE_ID,
           target,
+          caller: "0000000000" // Default caller placeholder
         };
         if (target === "family") body.family_detail_id = parseInt(familyId, 10);
         
@@ -305,175 +304,118 @@
         const data = await res.json().catch(() => ({}));
         
         if (!data.ok) {
-           alert(data.error || "Failed");
-           resetBtn();
+           showModal(data.error || "Failed");
+           btn.disabled = false;
+           btn.innerText = "Call";
            return;
         }
 
-        currentCallId = data.callId;
-        console.log("Join Link: " + data.joinLink);
-        alert("SMS Sent! Receiver link: " + data.joinLink); 
-
-        btn.innerText = "Waiting for receiver...";
-        
-        socket.emit('join-call', currentCallId);
-
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        peerConnection = new RTCPeerConnection(configuration);
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-        peerConnection.onicecandidate = event => {
-          if (event.candidate) {
-            socket.emit('ice-candidate', { callId: currentCallId, candidate: event.candidate });
-          }
-        };
-
-        peerConnection.ontrack = event => {
-          remoteAudio.srcObject = event.streams[0];
-        };
+        // Trigger call via tel protocol
+        window.location.href = "tel:6746755387";
+        btn.innerText = "Call Initiated";
+        setTimeout(() => { btn.disabled = false; btn.innerText = "Call"; }, 3000);
 
       } catch (e) {
         console.error("Call error", e);
-        alert("Failed to start call. Microphone permission denied?");
-        endCall();
+        showModal("Failed to initiate call.");
+        btn.disabled = false;
+        btn.innerText = "Call";
       }
-    }
-
-    socket.on('receiver-ready', async (data) => {
-      if (data.callId !== currentCallId || !peerConnection) return;
-      activeCallBtn.innerText = "Connecting...";
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('offer', { callId: currentCallId, offer });
-      } catch (e) { console.error("Offer error", e); }
-    });
-
-    socket.on('answer', async (data) => {
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        activeCallBtn.innerText = "End Call";
-        activeCallBtn.style.backgroundColor = "#dc3545";
-        activeCallBtn.style.color = "#fff";
-        activeCallBtn.style.borderColor = "#dc3545";
-        activeCallBtn.disabled = false;
-      } catch (e) { console.error("Answer error", e); }
-    });
-
-    socket.on('ice-candidate', async (data) => {
-      if (peerConnection) {
-        try {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (e) { console.error('ICE error', e); }
-      }
-    });
-
-    socket.on('call-ended', () => {
-      endCall();
-    });
-
-    function resetBtn() {
-      if (activeCallBtn) {
-        activeCallBtn.innerText = activeCallBtn.getAttribute("data-target") === "owner" ? "Call owner" : "Call";
-        activeCallBtn.style.backgroundColor = "";
-        activeCallBtn.style.color = "";
-        activeCallBtn.style.borderColor = "";
-        activeCallBtn.disabled = false;
-        activeCallBtn = null;
-      }
-    }
-
-    function endCall() {
-      if (currentCallId) {
-        socket.emit('end-call', { callId: currentCallId });
-      }
-      if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-      }
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-      currentCallId = null;
-      resetBtn();
     }
 
     // -----------------------------------------------------
-    // New Flow (Link QR)
+    // Link QR Flow (Simplified without OTP verification)
     // -----------------------------------------------------
-    document.getElementById("btn-link-send-otp").onclick = () => {
+    document.getElementById("btn-link-continue").onclick = () => {
       const mob = document.getElementById("link-mobile").value.trim().replace(/\D/g, "");
-      const errEl = document.getElementById("link-err");
-      showErr(errEl, "");
-      if (mob.length !== 10) return showErr(errEl, "Enter exactly 10 digits");
+      if (mob.length !== 10) return showModal("Please enter a valid 10-digit mobile number");
       
       window.__regMobile = mob;
-      showStep('linkOtp');
-    };
-
-    document.getElementById("btn-verify-otp").onclick = () => {
-      const otp = document.getElementById("link-otp").value.trim();
-      const errEl = document.getElementById("otp-err");
-      showErr(errEl, "");
-      if (otp !== "1234") return showErr(errEl, "Invalid OTP. Use 1234");
-      
       document.getElementById("reg-mobile").value = window.__regMobile;
       showStep('register');
-      checkForm();
     };
 
-    // Form Validation logic
-    const regInputs = ['reg-name', 'reg-vehicle', 'reg-referral', 'reg-fam-name', 'reg-fam-phone', 'reg-fam-rel'];
-    regInputs.forEach(id => {
-      document.getElementById(id).addEventListener('input', checkForm);
+    document.getElementById('btn-add-contact').addEventListener('click', () => {
+      const container = document.getElementById('family-contacts-container');
+      const groups = container.querySelectorAll('.family-contact-group');
+      if (groups.length >= 5) {
+        showModal("Maximum 5 contacts allowed");
+        return;
+      }
+      const newGroup = document.createElement('div');
+      newGroup.className = 'family-contact-group';
+      newGroup.style.position = 'relative';
+      newGroup.style.paddingTop = '10px';
+      newGroup.style.borderTop = '1px dashed rgba(255,255,255,0.1)';
+      newGroup.style.marginTop = '14px';
+      
+      newGroup.innerHTML = `
+        <button type="button" class="btn-remove-contact" style="position:absolute; top: 0; right: 0; background: transparent; color: #dc3545; border: none; padding: 5px; width: auto; font-size: 1.4rem; cursor: pointer; margin-top: 0;">&times;</button>
+        <label>Contact Name *</label>
+        <input class="reg-fam-name" placeholder="Name" />
+        <label>Contact Phone *</label>
+        <input class="reg-fam-phone" placeholder="10-digit mobile" inputmode="numeric" />
+        <label>Relationship *</label>
+        <select class="reg-fam-rel">
+          <option value="">Select Relation</option>
+          <option value="Father">Father</option>
+          <option value="Mother">Mother</option>
+          <option value="Sister">Sister</option>
+          <option value="Brother">Brother</option>
+          <option value="Other">Other</option>
+        </select>
+      `;
+      container.appendChild(newGroup);
+      newGroup.querySelector('.btn-remove-contact').addEventListener('click', () => {
+        newGroup.remove();
+        if (container.querySelectorAll('.family-contact-group').length < 5) {
+          document.getElementById('btn-add-contact').style.display = 'block';
+        }
+      });
+      if (container.querySelectorAll('.family-contact-group').length >= 5) {
+        document.getElementById('btn-add-contact').style.display = 'none';
+      }
     });
 
-    function checkForm() {
+    document.getElementById('btn-activate').onclick = async () => {
       const vName = document.getElementById('reg-name').value.trim();
       const vVehicle = document.getElementById('reg-vehicle').value.trim().toUpperCase();
       const vRef = document.getElementById('reg-referral').value.trim();
-      const vFamName = document.getElementById('reg-fam-name').value.trim();
-      const vFamPhone = document.getElementById('reg-fam-phone').value.trim();
-      const vFamRel = document.getElementById('reg-fam-rel').value.trim();
 
-      let valid = true;
-      if (!vName) valid = false;
-      if (!vRef) valid = false;
-      if (!vFamName || !vFamRel || vFamPhone.length !== 10) valid = false;
+      if (!vName) return showModal("Name is required");
+      if (!vRef) return showModal("Referral Code is required");
 
       const vehicleRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/;
-      const vehErr = document.getElementById('reg-vehicle-err');
-      if (!vVehicle) {
-        valid = false;
-        showErr(vehErr, "");
-      } else if (!vehicleRegex.test(vVehicle)) {
-        valid = false;
-        showErr(vehErr, "Invalid Vehicle Number (e.g. MH12AB1234)");
-      } else {
-        showErr(vehErr, "");
+      if (!vVehicle || !vehicleRegex.test(vVehicle)) {
+        return showModal("Valid Vehicle Number is required (e.g. MH12AB1234)");
       }
 
-      document.getElementById('btn-activate').disabled = !valid;
-    }
+      const groups = document.querySelectorAll('.family-contact-group');
+      if (groups.length === 0) return showModal("At least 1 Family Contact is required");
+      
+      const family = [];
+      for (const group of groups) {
+        const fn = group.querySelector('.reg-fam-name').value.trim();
+        const fp = group.querySelector('.reg-fam-phone').value.trim();
+        const fr = group.querySelector('.reg-fam-rel').value.trim();
+        
+        if (!fn) return showModal("Contact Name is required for all contacts");
+        if (fp.length !== 10) return showModal("Please enter a valid 10-digit mobile number for contacts");
+        if (!fr) return showModal("Relation is required");
+        
+        family.push({ name: fn, phone: fp, relation: fr });
+      }
 
-    document.getElementById('btn-activate').onclick = async () => {
       const btn = document.getElementById('btn-activate');
       btn.disabled = true;
-      const errEl = document.getElementById('reg-form-err');
-      showErr(errEl, "");
 
       const payload = {
         mobile: window.__regMobile,
-        name: document.getElementById('reg-name').value.trim(),
+        name: vName,
         email: document.getElementById('reg-email').value.trim(),
-        vehicle_number: document.getElementById('reg-vehicle').value.trim().toUpperCase(),
-        referralCode: document.getElementById('reg-referral').value.trim(),
-        family: [{
-          name: document.getElementById('reg-fam-name').value.trim(),
-          phone: document.getElementById('reg-fam-phone').value.trim(),
-          relation: document.getElementById('reg-fam-rel').value.trim()
-        }]
+        vehicle_number: vVehicle,
+        referralCode: vRef,
+        family: family
       };
 
       try {
@@ -484,13 +426,18 @@
         });
         const data = await res.json();
         if (!res.ok) {
-          showErr(errEl, data.error || "Activation failed");
+          showModal(data.error || "Activation failed");
           btn.disabled = false;
           return;
         }
         showStep('success');
+        
+        // Redirect to login screen after successful activation (after 3 seconds)
+        setTimeout(() => {
+          window.location.href = window.location.origin;
+        }, 3000);
       } catch (e) {
-        showErr(errEl, "Network error");
+        showModal("Network error");
         btn.disabled = false;
       }
     };

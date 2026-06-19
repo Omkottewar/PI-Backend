@@ -5,6 +5,9 @@ import profileRoutes from './routes/profile.routes.js';
 import qrRoutes from './routes/qr.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import alertRoutes from './routes/alert.routes.js';
+import callHistoryRoutes from './routes/callHistory.routes.js';
+import appRoutes from './routes/app.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 const app = express();
 
@@ -17,6 +20,10 @@ app.use('/auth', authRoutes);
 app.use('/profile', profileRoutes);
 app.use('/qr', qrRoutes);
 app.use('/payments', paymentRoutes);
+app.use('/api/call-history', callHistoryRoutes);
+app.use('/api/app', appRoutes);
+app.use('/api/notifications', notificationRoutes);
+
 
 import path from 'path';
 import { fileURLToPath } from 'url';

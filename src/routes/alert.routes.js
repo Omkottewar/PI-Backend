@@ -32,11 +32,13 @@ router.post(
   body('uniqueId').notEmpty(),
   body('target').isIn(['owner', 'family']),
   body('family_detail_id').optional().isInt(),
+  body('caller').optional().trim(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { uniqueId, target, family_detail_id } = req.body;
+    const caller = req.body.caller || '0000000000';
     const qr = await getQrByUniqueId(uniqueId);
     if (!qr) return res.status(404).json({ error: 'QR not found' });
 
@@ -50,13 +52,34 @@ router.post(
       receiverNumber = member.phone;
     }
 
-    const callId = uuidv4();
-    const joinLink = `${config.publicAppUrl}/call/${callId}`;
-    
-    console.log(`\n\n[SMS Simulation] To: ${receiverNumber}`);
-    console.log(`You have an incoming call. Join here:\n${joinLink}\n\n`);
+    try {
+      await pool.query(
+        'INSERT INTO call_logs (caller_number, receiver_number, status, start_time) VALUES ($1, $2, $3, NOW())',
+        [caller, receiverNumber, 'initiated']
+      );
 
-    return res.json({ ok: true, callId, joinLink });
+      const apiRes = await fetch('https://panelv3.cloudshope.com/api/outboundCall', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.cloudshopeApiToken}`
+        },
+        body: JSON.stringify({
+          from_number: caller,
+          mobile_number: receiverNumber
+        })
+      });
+
+
+      if (!apiRes.ok) {
+        throw new Error('Cloudshope API returned ' + apiRes.status);
+      }
+
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error('Call init error:', e);
+      return res.status(500).json({ error: 'Failed to initiate call via API' });
+    }
   }
 );
 
@@ -130,18 +153,32 @@ router.post('/:uniqueId/manual_activate',
       return res.status(400).json({ error: 'Invalid QR or Referral Code' });
     }
 
-    // Create manualUser
-    const userRes = await pool.query(
-      `INSERT INTO users (name, mobile, email, manual_user) VALUES ($1, $2, $3, true)
-       ON CONFLICT (mobile) DO UPDATE SET name=$1, email=$3 RETURNING id`,
-      [name, mobile, email || null]
-    );
-    const userId = userRes.rows[0].id;
+    // Check if user exists
+    const existingRes = await pool.query(`SELECT id FROM users WHERE mobile = $1`, [mobile]);
+    if (existingRes.rows.length > 0) {
+      return res.status(400).json({ error: 'User already exists with this number' });
+    }
+
+    let userId;
+    try {
+      // Create manualUser
+      const userRes = await pool.query(
+        `INSERT INTO users (name, mobile, email, manual_user) VALUES ($1, $2, $3, true) RETURNING id`,
+        [name, mobile, email || null]
+      );
+      userId = userRes.rows[0].id;
+    } catch (err) {
+      if (err.code === '23505') { // postgres unique constraint
+        return res.status(400).json({ error: 'User already exists with this number' });
+      }
+      return res.status(500).json({ error: err.message });
+    }
 
     // Use internal QR service
     try {
       await createQrRecord({
         userId,
+        uniqueId,
         razorpay_order_id: 'manual',
         razorpay_payment_id: 'manual',
         razorpay_signature: 'manual',
