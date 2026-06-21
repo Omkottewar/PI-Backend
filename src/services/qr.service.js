@@ -56,13 +56,30 @@ export async function createQrRecord({
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    let digits;
+    try {
+      const seqRes = await client.query(
+        `SELECT LPAD(nextval('qrdata_digits_seq')::text, 4, '0') AS digits`
+      );
+      digits = seqRes.rows[0].digits;
+    } catch (e) {
+      if (String(e.message || '').toLowerCase().includes('reached maximum value')) {
+        const err = new Error('QR short-code space exhausted (max 9999 QRs)');
+        err.statusCode = 503;
+        throw err;
+      }
+      throw e;
+    }
+
     const qrRes = await client.query(
-      `INSERT INTO qrdata (user_id, unique_id, name, mobile, email, vehicle_number, blood_group)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO qrdata (user_id, unique_id, name, mobile, email, vehicle_number, blood_group, digits)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [userId, uniqueId, name.trim(), mobile.trim(), email.trim(), vehicleNorm, blood_group || null]
+      [userId, uniqueId, name.trim(), mobile.trim(), email.trim(), vehicleNorm, blood_group || null, digits]
     );
     const qr = qrRes.rows[0];
+
     for (const f of family) {
       await client.query(
         `INSERT INTO family_details (qr_id, name, phone, relation) VALUES ($1, $2, $3, $4)`,
@@ -70,7 +87,7 @@ export async function createQrRecord({
       );
     }
     await client.query('COMMIT');
-    const alertUrl = `${config.publicAppUrl}/alert/${uniqueId}`;
+    const alertUrl = `${config.publicAppUrl}/alert/${uniqueId}?digits=${qr.digits}`;
     return { ...qr, alertUrl };
   } catch (e) {
     await client.query('ROLLBACK');
@@ -82,7 +99,7 @@ export async function createQrRecord({
 
 export async function listHistoryForUser(userId) {
   const res = await pool.query(
-    `SELECT q.id, q.unique_id, q.name, q.mobile, q.email, q.vehicle_number, q.blood_group, q.created_at, q.is_active, q.date_of_activation,
+    `SELECT q.id, q.unique_id, q.digits, q.name, q.mobile, q.email, q.vehicle_number, q.blood_group, q.created_at, q.is_active, q.date_of_activation,
             (SELECT COUNT(*)::int FROM family_details f WHERE f.qr_id = q.id) AS family_count
      FROM qrdata q
      WHERE q.user_id = $1

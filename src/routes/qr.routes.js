@@ -50,6 +50,7 @@ router.post(
       return res.status(201).json({
         id: row.id,
         unique_id: row.unique_id,
+        digits: row.digits,
         alert_url: row.alertUrl,
         vehicle_number: row.vehicle_number,
         created_at: row.created_at,
