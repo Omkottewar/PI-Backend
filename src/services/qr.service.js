@@ -106,7 +106,10 @@ export async function listHistoryForUser(userId) {
      ORDER BY q.created_at DESC`,
     [userId]
   );
-  return res.rows;
+  return res.rows.map((row) => ({
+    ...row,
+    alert_url: `${config.publicAppUrl}/alert/${row.unique_id}?digits=${row.digits}`,
+  }));
 }
 
 export async function getQrByUniqueId(uniqueId) {
