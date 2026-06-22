@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 const router = Router();
 
-const HARDCODED_NUMBER = '9156250188';
+const HARDCODED_NUMBER = '+917972617154';
 const TRIGGER_DIGITS = '1234';
 
 router.get('/lookup', (req, res) => {
@@ -11,10 +11,10 @@ router.get('/lookup', (req, res) => {
   console.log('[exotel/lookup]', { CallSid, CallFrom, digits });
 
   if (String(digits || '').trim() === TRIGGER_DIGITS) {
-    return res.json({ number: HARDCODED_NUMBER });
+    return res.type('text/plain').send(HARDCODED_NUMBER);
   }
 
-  return res.status(404).json({ number: null });
+  return res.status(404).type('text/plain').send('');
 });
 
 export default router;
