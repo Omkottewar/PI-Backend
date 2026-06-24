@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { verifyOtpAndLogin } from '../services/auth.service.js';
 import { databaseErrorResponse } from '../utils/dbErrors.js';
+import { requireAuth } from '../middleware/auth.js';
+import { pool } from '../db/pool.js';
 
 const router = Router();
 
@@ -51,5 +53,29 @@ router.post(
     }
   }
 );
+
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, name, mobile, email, age, address, manual_user, created_at
+         FROM users WHERE id = $1`,
+      [req.userId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
+    return res.json({ user: r.rows[0] });
+  } catch (e) {
+    const db = databaseErrorResponse(e);
+    if (db) return res.status(db.status).json({ error: db.error, hint: db.hint });
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/logout', requireAuth, async (req, res) => {
+  // JWT is stateless — clients drop the token. This endpoint exists so the
+  // client always has a server hook to call on logout (telemetry, future
+  // token revocation table, etc.). Returns 200 even if the token was already
+  // expired so the client can finish cleanup either way.
+  return res.json({ success: true });
+});
 
 export default router;

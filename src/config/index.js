@@ -12,7 +12,6 @@ export const config = {
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
   publicAppUrl: (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
-  cloudshopeApiToken: process.env.CLOUDSHOPE_API_TOKEN
 };
 
 export function assertConfig() {

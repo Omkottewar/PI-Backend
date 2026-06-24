@@ -280,47 +280,30 @@
       btn.disabled = false;
     };
 
-    async function onCall(ev) {
-      const btn = ev.currentTarget;
-      const target = btn.getAttribute("data-target");
-      const familyId = btn.getAttribute("data-id");
-      
-      btn.disabled = true;
-      btn.innerText = "Initiating...";
-      
+    // The dialer always opens for the user; the server POST is best-effort
+    // scan-event logging that runs in the background.
+    var BRIDGE_NUMBER = "02048563508";
+
+    function onCall(ev) {
+      var btn = ev.currentTarget;
+      var target = btn.getAttribute("data-target");
+      var familyId = btn.getAttribute("data-id");
+
+      // Fire-and-forget scan log. Failures never block the call.
       try {
-        const body = {
-          uniqueId: UNIQUE_ID,
-          target,
-          caller: "0000000000" // Default caller placeholder
-        };
+        var body = { uniqueId: UNIQUE_ID, target: target, caller: "0000000000" };
         if (target === "family") body.family_detail_id = parseInt(familyId, 10);
-        
-        const res = await fetch(base + "/alert/create-call", {
+        fetch(base + "/alert/create-call", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        
-        if (!data.ok) {
-           showModal(data.error || "Failed");
-           btn.disabled = false;
-           btn.innerText = "Call";
-           return;
-        }
+          keepalive: true,
+        }).catch(function () { /* ignore */ });
+      } catch (_) { /* ignore */ }
 
-        // Trigger call via tel protocol
-        window.location.href = "tel:6746755387";
-        btn.innerText = "Call Initiated";
-        setTimeout(() => { btn.disabled = false; btn.innerText = "Call"; }, 3000);
-
-      } catch (e) {
-        console.error("Call error", e);
-        showModal("Failed to initiate call.");
-        btn.disabled = false;
-        btn.innerText = "Call";
-      }
+      btn.innerText = "Opening dialer...";
+      window.location.href = "tel:" + BRIDGE_NUMBER;
+      setTimeout(function () { btn.innerText = "Call"; }, 2000);
     }
 
     // -----------------------------------------------------

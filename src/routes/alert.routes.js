@@ -9,7 +9,6 @@ import {
   createQrRecord,
 } from '../services/qr.service.js';
 import { v4 as uuidv4 } from 'uuid';
-import { config } from '../config/index.js';
 
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -53,32 +52,19 @@ router.post(
     }
 
     try {
+      // Record the scan/call attempt. The actual dialing happens on the
+      // scanner's device via the tel: protocol — this endpoint only logs
+      // that someone tapped Call so we have a scan trail.
       await pool.query(
         'INSERT INTO call_logs (caller_number, receiver_number, status, start_time) VALUES ($1, $2, $3, NOW())',
         [caller, receiverNumber, 'initiated']
       );
-
-      const apiRes = await fetch('https://panelv3.cloudshope.com/api/outboundCall', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.cloudshopeApiToken}`
-        },
-        body: JSON.stringify({
-          from_number: caller,
-          mobile_number: receiverNumber
-        })
-      });
-
-
-      if (!apiRes.ok) {
-        throw new Error('Cloudshope API returned ' + apiRes.status);
-      }
-
       return res.json({ ok: true });
     } catch (e) {
-      console.error('Call init error:', e);
-      return res.status(500).json({ error: 'Failed to initiate call via API' });
+      console.error('Call log insert failed:', e);
+      // Logging failure shouldn't block the user from being able to call.
+      // Return ok so the client opens the dialer regardless.
+      return res.json({ ok: true });
     }
   }
 );

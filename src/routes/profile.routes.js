@@ -18,31 +18,56 @@ router.get('/', requireAuth, async (req, res) => {
 router.put(
   '/',
   requireAuth,
-  body('name').optional().isString().trim(),
-  body('email').optional({ values: 'falsy' }).isEmail().normalizeEmail(),
-  body('age').optional().isInt({ min: 1, max: 150 }),
-  body('address').optional().isString().trim(),
+  body('name').optional({ nullable: true }).isString().trim(),
+  body('email').optional({ nullable: true, values: 'falsy' }).isEmail().normalizeEmail(),
+  body('age').optional({ nullable: true }).isInt({ min: 1, max: 150 }),
+  body('address').optional({ nullable: true }).isString().trim(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    const { name, email, age, address } = req.body;
+    // Only update fields the client explicitly sent. An empty string clears
+    // the field; an absent key keeps the existing value. This is what the
+    // user expects when they erase the address box and hit Save.
+    const sets = [];
+    const params = [req.userId];
+    const push = (col, value) => {
+      params.push(value);
+      sets.push(`${col} = $${params.length}`);
+    };
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      const v = req.body.name;
+      push('name', v == null ? null : String(v).trim() || null);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'email')) {
+      const v = req.body.email;
+      push('email', v == null || v === '' ? null : String(v).trim());
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'age')) {
+      const v = req.body.age;
+      push('age', v == null || v === '' ? null : Number(v));
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'address')) {
+      const v = req.body.address;
+      push('address', v == null ? null : String(v).trim() || null);
+    }
+
+    if (sets.length === 0) {
+      const cur = await pool.query(
+        `SELECT id, name, mobile, email, age, address, created_at FROM users WHERE id = $1`,
+        [req.userId]
+      );
+      if (!cur.rows.length) return res.status(404).json({ error: 'User not found' });
+      return res.json(cur.rows[0]);
+    }
+
     const r = await pool.query(
-      `UPDATE users SET
-        name = COALESCE(NULLIF(TRIM($2::text), ''), name),
-        email = COALESCE(NULLIF(TRIM($3::text), ''), email),
-        age = COALESCE($4, age),
-        address = COALESCE(NULLIF(TRIM($5::text), ''), address)
-      WHERE id = $1
-      RETURNING id, name, mobile, email, age, address, created_at`,
-      [
-        req.userId,
-        name === undefined ? null : String(name),
-        email === undefined ? null : String(email),
-        age === undefined ? null : age,
-        address === undefined ? null : String(address),
-      ]
+      `UPDATE users SET ${sets.join(', ')}
+       WHERE id = $1
+       RETURNING id, name, mobile, email, age, address, created_at`,
+      params
     );
     if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
     return res.json(r.rows[0]);
