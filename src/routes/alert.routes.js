@@ -133,7 +133,7 @@ router.get('/:uniqueId/status', async (req, res) => {
 router.post('/:uniqueId/manual_activate',
   body('mobile').trim().notEmpty(),
   body('name').trim().notEmpty(),
-  body('vehicle_number').trim().matches(/^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/),
+  body('vehicle_number').trim().matches(/^([A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2})$/),
   body('referralCode').trim().notEmpty(),
   body('family').isArray({ min: 1, max: 5 }),
   async (req, res) => {
@@ -169,6 +169,7 @@ router.post('/:uniqueId/manual_activate',
       userId = userRes.rows[0].id;
     } catch (err) {
       if (err.code === '23505') { // postgres unique constraint
+        console.error('manual_activate duplicate user:', err);
         return res.status(400).json({ error: 'User already exists with this number' });
       }
       return res.status(500).json({ error: err.message });
@@ -187,7 +188,8 @@ router.post('/:uniqueId/manual_activate',
         email: email || '',
         vehicle_number,
         blood_group: null,
-        family
+        family,
+        isManual: true,
       });
       // Deactivate manual QR
       await pool.query(`UPDATE manual_qr SET is_active = false WHERE id = $1`, [manualQr.id]);
