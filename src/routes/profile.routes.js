@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validateFamilyRelation } from '../services/qr.service.js';
+import { maskMobile } from '../utils/mask.js';
 
 const router = Router();
 
@@ -180,5 +181,89 @@ router.post('/device-token', requireAuth,
     }
   }
 );
+
+// ─── Caller activity ────────────────────────────────────────────────────
+// Every Exotel lookup writes to caller_activity so the owner can see who has
+// been calling their QR. The listing endpoint masks phone numbers by default;
+// pass ?reveal=true to see full numbers (useful for the "Reveal" UI button).
+// Block / unblock endpoints toggle is_blocked which the Exotel lookup honours.
+
+router.get('/caller-activity', requireAuth, async (req, res) => {
+  const reveal = String(req.query.reveal || '').toLowerCase() === 'true';
+  try {
+    const r = await pool.query(
+      `SELECT
+          ca.id,
+          ca.qr_id,
+          q.vehicle_number,
+          q.digits,
+          ca.caller_number,
+          ca.call_count,
+          ca.first_call_at,
+          ca.last_call_at,
+          ca.is_blocked,
+          ca.blocked_at
+        FROM caller_activity ca
+        JOIN qrdata q ON q.id = ca.qr_id
+        WHERE q.user_id = $1
+        ORDER BY ca.call_count DESC, ca.last_call_at DESC
+        LIMIT 200`,
+      [req.userId]
+    );
+    const items = r.rows.map((row) => ({
+      ...row,
+      caller_number: reveal ? row.caller_number : maskMobile(row.caller_number),
+    }));
+    return res.json({ items });
+  } catch (err) {
+    console.error('Error fetching caller activity:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Verifies the activity row belongs to a QR owned by the requesting user.
+// Returns the row id if OK, or null (so caller can 404 the request).
+async function assertActivityOwnedBy(activityId, userId) {
+  const check = await pool.query(
+    `SELECT ca.id
+       FROM caller_activity ca
+       JOIN qrdata q ON q.id = ca.qr_id
+      WHERE ca.id = $1 AND q.user_id = $2`,
+    [activityId, userId]
+  );
+  return check.rows.length ? check.rows[0].id : null;
+}
+
+router.post('/caller-activity/:id/block', requireAuth, async (req, res) => {
+  const activityId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(activityId)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  const ok = await assertActivityOwnedBy(activityId, req.userId);
+  if (!ok) return res.status(404).json({ error: 'Not found' });
+  await pool.query(
+    `UPDATE caller_activity
+        SET is_blocked = true, blocked_at = NOW()
+      WHERE id = $1`,
+    [activityId]
+  );
+  return res.json({ ok: true });
+});
+
+router.delete('/caller-activity/:id/block', requireAuth, async (req, res) => {
+  const activityId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(activityId)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  const ok = await assertActivityOwnedBy(activityId, req.userId);
+  if (!ok) return res.status(404).json({ error: 'Not found' });
+  await pool.query(
+    `UPDATE caller_activity
+        SET is_blocked = false, blocked_at = NULL
+      WHERE id = $1`,
+    [activityId]
+  );
+  return res.json({ ok: true });
+});
 
 export default router;

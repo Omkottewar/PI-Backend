@@ -7,21 +7,28 @@ const router = Router();
 // TTL displayed in the alert page's dial modal.
 const SELECTION_TTL_MINUTES = 30;
 
-// GET /exotel/lookup?digits=XXXXX
+// When a single caller has made this many total calls to the same QR, log
+// a threshold-crossed line so the owner can be notified. Cumulative count,
+// not windowed — one lifetime threshold per (QR, caller) pair.
+const SPAM_NOTIFY_THRESHOLD = 5;
+
+// GET /exotel/lookup?digits=XXXXX&CallFrom=+91NNNNNNNNNN&CallSid=...
 //   Called by the Exotel IVR after the scanner types the QR's 5-digit
 //   extension code. Returns the real phone number of the contact the
 //   bystander tapped on the alert page — as text/plain, no JSON, no quotes.
 //   Returns 404 with an empty body if:
 //     - the digits don't map to any active QR
+//     - the caller has been blocked for this QR by the owner
 //     - no contact has been selected yet
 //     - the selection is older than SELECTION_TTL_MINUTES
 //   Falls back to the owner's mobile if the selected family contact was
 //   deleted after selection (FK SET NULL on family_details).
 router.get('/lookup', async (req, res) => {
   const digits = String(req.query.digits || '').trim();
-  const { CallSid, CallFrom } = req.query;
+  const callSid = req.query.CallSid;
+  const callerNumber = String(req.query.CallFrom || '').trim();
 
-  console.log('[exotel/lookup]', { CallSid, CallFrom, digits });
+  console.log('[exotel/lookup]', { CallSid: callSid, CallFrom: callerNumber, digits });
 
   if (!digits) {
     return res.status(404).type('text/plain').send('');
@@ -47,6 +54,41 @@ router.get('/lookup', async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    // Track this call attempt against (qr_id, callerNumber) and check whether
+    // the owner has blocked this caller. We track BEFORE the selection/TTL
+    // check on purpose — the owner should still see blocked callers who
+    // keep trying, so the count keeps climbing even after a block.
+    let isBlocked = false;
+    if (callerNumber) {
+      try {
+        const upsert = await pool.query(
+          `INSERT INTO caller_activity
+             (qr_id, caller_number, call_count, first_call_at, last_call_at)
+           VALUES ($1, $2, 1, NOW(), NOW())
+           ON CONFLICT (qr_id, caller_number) DO UPDATE
+             SET call_count   = caller_activity.call_count + 1,
+                 last_call_at = NOW()
+           RETURNING call_count, is_blocked`,
+          [row.id, callerNumber]
+        );
+        const activity = upsert.rows[0];
+        isBlocked = activity.is_blocked === true;
+        if (activity.call_count === SPAM_NOTIFY_THRESHOLD) {
+          console.warn(
+            `[caller-activity] threshold crossed qr_id=${row.id} ` +
+              `caller=${callerNumber} count=${activity.call_count}`
+          );
+        }
+      } catch (err) {
+        // Tracking must never break the primary routing path.
+        console.error('[caller-activity] upsert failed:', err);
+      }
+    }
+
+    if (isBlocked) {
+      return res.status(404).type('text/plain').send('');
+    }
 
     // Selection must exist.
     if (!row.selected_contact_kind || !row.selected_at) {
