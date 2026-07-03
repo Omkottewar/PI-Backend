@@ -159,6 +159,68 @@ router.post(
   }
 );
 
+// The bystander's browser calls this after tapping a contact. Location is
+// optional — a null lat/lng means the browser denied the Geolocation prompt
+// or the bystander is on a device without GPS. Never blocks the emergency
+// call; the alert page fires this in the background.
+router.post(
+  '/:uniqueId/event',
+  body('contact_kind').isIn(['owner', 'family']),
+  body('contact_family_id').optional({ nullable: true }).isInt(),
+  body('latitude').optional({ nullable: true }).isFloat({ min: -90, max: 90 }),
+  body('longitude').optional({ nullable: true }).isFloat({ min: -180, max: 180 }),
+  body('accuracy_meters').optional({ nullable: true }).isFloat({ min: 0 }),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { uniqueId } = req.params;
+    const {
+      contact_kind,
+      contact_family_id,
+      latitude,
+      longitude,
+      accuracy_meters,
+    } = req.body;
+
+    const qr = await getQrByUniqueId(uniqueId);
+    if (!qr) return res.status(404).json({ error: 'QR not found' });
+
+    let familyIdToStore = null;
+    if (contact_kind === 'family' && contact_family_id != null) {
+      const famRes = await pool.query(
+        `SELECT id FROM family_details WHERE id = $1 AND qr_id = $2`,
+        [contact_family_id, qr.id]
+      );
+      if (famRes.rows.length) {
+        familyIdToStore = contact_family_id;
+      }
+      // If family_id doesn't match this QR, we silently drop it — event is
+      // still recorded for the audit trail with contact_family_id = null.
+    }
+
+    const userAgent = String(req.headers['user-agent'] || '').slice(0, 500);
+
+    await pool.query(
+      `INSERT INTO alert_events
+         (qr_id, contact_kind, contact_family_id, latitude, longitude,
+          accuracy_meters, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        qr.id,
+        contact_kind,
+        familyIdToStore,
+        latitude == null ? null : Number(latitude),
+        longitude == null ? null : Number(longitude),
+        accuracy_meters == null ? null : Number(accuracy_meters),
+        userAgent,
+      ]
+    );
+
+    return res.json({ ok: true });
+  }
+);
+
 router.get('/:uniqueId/status', async (req, res) => {
   const { uniqueId } = req.params;
   const qr = await getQrByUniqueId(uniqueId);

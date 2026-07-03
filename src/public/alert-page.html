@@ -299,7 +299,43 @@
     //   1. POST /select — pin this contact as the IVR's routing target.
     //   2. Only on success, show the code modal and open the dialer.
     // The dialer never opens unless step 1 succeeds — no phantom calls.
+    // In parallel, request the bystander's geolocation and log an event to
+    // /alert/:uniqueId/event so the owner sees where the tap happened.
     var BRIDGE_NUMBER = "02048563508";
+
+    // Wraps Geolocation.getCurrentPosition in a Promise with an 8-second
+    // hard timeout. Resolves to null if unavailable, denied, or slow — so
+    // the calling code can safely `await` it without blocking the dialer.
+    function requestLocation() {
+      return new Promise(function (resolve) {
+        if (!navigator.geolocation) return resolve(null);
+        var settled = false;
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          resolve(null);
+        }, 8000);
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy_meters: pos.coords.accuracy,
+            });
+          },
+          function () {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(null);
+          },
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        );
+      });
+    }
 
     async function onCall(ev) {
       var btn = ev.currentTarget;
@@ -322,6 +358,12 @@
         }
       } catch (_) { /* ignore */ }
 
+      // Kick off the geolocation request in parallel with /select — the
+      // browser will show its own permission prompt. If the bystander
+      // denies or the GPS is slow, we fall through with a null location;
+      // the dialer never blocks on it.
+      var locationPromise = requestLocation();
+
       try {
         var selectBody = { kind: target };
         if (target === "family") selectBody.family_id = parseInt(familyId, 10);
@@ -340,7 +382,7 @@
           return;
         }
 
-        // Fire-and-forget scan log. Never blocks the dialer.
+        // Fire-and-forget legacy scan log (call_logs table).
         try {
           var logBody = { uniqueId: UNIQUE_ID, target: target, caller: "0000000000" };
           if (target === "family") logBody.family_detail_id = parseInt(familyId, 10);
@@ -351,6 +393,25 @@
             keepalive: true,
           }).catch(function () { /* ignore */ });
         } catch (_) { /* ignore */ }
+
+        // Once we have the location (or a null timeout), log the tap +
+        // location as an alert_events row. Fire-and-forget so it never
+        // blocks the dialer.
+        locationPromise.then(function (loc) {
+          var eventBody = { contact_kind: target };
+          if (target === "family") eventBody.contact_family_id = parseInt(familyId, 10);
+          if (loc) {
+            eventBody.latitude = loc.latitude;
+            eventBody.longitude = loc.longitude;
+            eventBody.accuracy_meters = loc.accuracy_meters;
+          }
+          fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(eventBody),
+            keepalive: true,
+          }).catch(function () { /* ignore */ });
+        });
 
         // Populate + show the dial modal with the QR's 5-digit code.
         document.getElementById("dial-modal-contact").textContent = "You are connecting to " + contactLabel + ".";

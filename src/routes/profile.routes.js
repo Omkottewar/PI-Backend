@@ -266,4 +266,62 @@ router.delete('/caller-activity/:id/block', requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
+// ─── Alerts ─────────────────────────────────────────────────────────────
+// One row per bystander tap on the alert page. Returns the last 90 days of
+// events across all of the caller's QRs, most recent first, with lat/lng
+// so the mobile client can build a "View on Google Maps" link.
+
+router.get('/alerts', requireAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT
+          ae.id,
+          ae.qr_id,
+          q.vehicle_number,
+          ae.contact_kind,
+          ae.contact_family_id,
+          fd.relation AS contact_family_relation,
+          fd.name     AS contact_family_name,
+          ae.latitude,
+          ae.longitude,
+          ae.accuracy_meters,
+          ae.user_agent,
+          ae.seen_at,
+          ae.created_at
+        FROM alert_events ae
+        JOIN qrdata q ON q.id = ae.qr_id
+        LEFT JOIN family_details fd ON fd.id = ae.contact_family_id
+       WHERE q.user_id = $1
+         AND ae.created_at > NOW() - INTERVAL '90 days'
+       ORDER BY ae.created_at DESC
+       LIMIT 100`,
+      [req.userId]
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    console.error('Error fetching alerts:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/alerts/:id/dismiss', requireAuth, async (req, res) => {
+  const alertId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(alertId)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  const check = await pool.query(
+    `SELECT ae.id
+       FROM alert_events ae
+       JOIN qrdata q ON q.id = ae.qr_id
+      WHERE ae.id = $1 AND q.user_id = $2`,
+    [alertId, req.userId]
+  );
+  if (!check.rows.length) return res.status(404).json({ error: 'Not found' });
+  await pool.query(
+    `UPDATE alert_events SET seen_at = NOW() WHERE id = $1`,
+    [alertId]
+  );
+  return res.json({ ok: true });
+});
+
 export default router;
