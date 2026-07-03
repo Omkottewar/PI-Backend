@@ -104,6 +104,61 @@ router.post(
   }
 );
 
+// The bystander taps a contact card on the alert page. This pins that
+// contact as the "selected" one for the QR (Story A / global pointer).
+// The IVR looks this up when the scanner enters the QR's 5-digit code.
+// Selection is required — the alert page will not open the dialer unless
+// this endpoint returns ok.
+router.post(
+  '/:uniqueId/select',
+  body('kind').isIn(['owner', 'family']),
+  body('family_id').optional().isInt(),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { uniqueId } = req.params;
+    const { kind, family_id } = req.body;
+
+    const qr = await getQrByUniqueId(uniqueId);
+    if (!qr) return res.status(404).json({ error: 'QR not found' });
+    if (qr.is_active === false) {
+      return res.status(400).json({ error: 'This QR is no longer active' });
+    }
+
+    let familyIdToStore = null;
+    if (kind === 'family') {
+      if (!family_id) {
+        return res.status(400).json({ error: 'family_id is required when kind = family' });
+      }
+      const famRes = await pool.query(
+        `SELECT id FROM family_details WHERE id = $1 AND qr_id = $2`,
+        [family_id, qr.id]
+      );
+      if (!famRes.rows.length) {
+        return res.status(400).json({ error: 'Contact does not belong to this QR' });
+      }
+      familyIdToStore = family_id;
+    }
+
+    await pool.query(
+      `UPDATE qrdata
+          SET selected_contact_kind = $1,
+              selected_family_id = $2,
+              selected_at = NOW()
+        WHERE id = $3`,
+      [kind, familyIdToStore, qr.id]
+    );
+
+    return res.json({
+      ok: true,
+      digits: qr.digits,
+      bridge_number: '02048563508',
+      ttl_minutes: 30,
+    });
+  }
+);
+
 router.get('/:uniqueId/status', async (req, res) => {
   const { uniqueId } = req.params;
   const qr = await getQrByUniqueId(uniqueId);

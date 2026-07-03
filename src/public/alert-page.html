@@ -94,6 +94,21 @@
 </head>
 <body>
   <!-- Validation Modal -->
+  <div id="dial-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; z-index: 10001; font-family: 'Inter', sans-serif;">
+    <div style="background: #161F33; padding: 24px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); width: 90%; max-width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); text-align: center;">
+      <h3 style="margin: 0 0 4px; color: #FF7A00; font-weight: 800;">Ready to connect</h3>
+      <p id="dial-modal-contact" style="margin: 0 0 16px; color: #94A3B8; font-size: 0.9rem; line-height: 1.4;"></p>
+      <div style="background: #0F1626; padding: 14px 8px; border-radius: 12px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.06);">
+        <div style="color: #94A3B8; font-size: 0.7rem; letter-spacing: 1.6px; font-weight: 800;">YOUR CODE</div>
+        <div id="dial-modal-code" style="color: #FFFFFF; font-size: 2.4rem; font-weight: 900; letter-spacing: 8px; margin-top: 4px;">—</div>
+      </div>
+      <p style="margin: 0 0 16px; color: #94A3B8; font-size: 0.85rem; line-height: 1.45;">
+        Tap <strong style="color:#FF7A00">Open dialer</strong>, place the call, then when the IVR asks — type the code above. Selection stays active for 30 minutes.
+      </p>
+      <button type="button" id="dial-modal-open" style="width: 100%; background: #FF7A00; color: #fff; padding: 14px; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1rem;">Open dialer</button>
+      <button type="button" onclick="document.getElementById('dial-modal').style.display='none'" style="width: 100%; background: transparent; color: #94A3B8; padding: 10px; border: none; margin-top: 6px; cursor: pointer; font-size: 0.9rem;">Cancel</button>
+    </div>
+  </div>
   <div id="validation-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 10000; font-family: 'Inter', sans-serif;">
     <div style="background: #161F33; padding: 24px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); width: 90%; max-width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); text-align: center;">
       <h3 style="margin-top: 0; margin-bottom: 12px; color: #FF7A00; font-weight:800;">Validation Error</h3>
@@ -280,30 +295,76 @@
       btn.disabled = false;
     };
 
-    // The dialer always opens for the user; the server POST is best-effort
-    // scan-event logging that runs in the background.
+    // Tapping a contact card is a two-step commit:
+    //   1. POST /select — pin this contact as the IVR's routing target.
+    //   2. Only on success, show the code modal and open the dialer.
+    // The dialer never opens unless step 1 succeeds — no phantom calls.
     var BRIDGE_NUMBER = "02048563508";
 
-    function onCall(ev) {
+    async function onCall(ev) {
       var btn = ev.currentTarget;
       var target = btn.getAttribute("data-target");
       var familyId = btn.getAttribute("data-id");
+      var origText = btn.innerText;
 
-      // Fire-and-forget scan log. Failures never block the call.
+      btn.disabled = true;
+      btn.innerText = "Selecting...";
+
+      // Derive a friendly label so the modal can say "You're connecting to Father — ****1234"
+      var contactLabel = "the emergency contact";
       try {
-        var body = { uniqueId: UNIQUE_ID, target: target, caller: "0000000000" };
-        if (target === "family") body.family_detail_id = parseInt(familyId, 10);
-        fetch(base + "/alert/create-call", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          keepalive: true,
-        }).catch(function () { /* ignore */ });
+        if (target === "owner") {
+          contactLabel = "the vehicle owner";
+        } else if (target === "family") {
+          var row = btn.parentElement;
+          var relText = row && row.querySelector("span") ? row.querySelector("span").textContent.trim() : "";
+          if (relText) contactLabel = relText;
+        }
       } catch (_) { /* ignore */ }
 
-      btn.innerText = "Opening dialer...";
-      window.location.href = "tel:" + BRIDGE_NUMBER;
-      setTimeout(function () { btn.innerText = "Call"; }, 2000);
+      try {
+        var selectBody = { kind: target };
+        if (target === "family") selectBody.family_id = parseInt(familyId, 10);
+
+        var selRes = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(selectBody),
+        });
+        var selData = await selRes.json().catch(function () { return {}; });
+
+        if (!selRes.ok || !selData.ok) {
+          showModal(selData.error || "Could not confirm your selection. Please try again.");
+          btn.disabled = false;
+          btn.innerText = origText;
+          return;
+        }
+
+        // Fire-and-forget scan log. Never blocks the dialer.
+        try {
+          var logBody = { uniqueId: UNIQUE_ID, target: target, caller: "0000000000" };
+          if (target === "family") logBody.family_detail_id = parseInt(familyId, 10);
+          fetch(base + "/alert/create-call", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(logBody),
+            keepalive: true,
+          }).catch(function () { /* ignore */ });
+        } catch (_) { /* ignore */ }
+
+        // Populate + show the dial modal with the QR's 5-digit code.
+        document.getElementById("dial-modal-contact").textContent = "You are connecting to " + contactLabel + ".";
+        document.getElementById("dial-modal-code").textContent = selData.digits || "";
+        document.getElementById("dial-modal-open").onclick = function () {
+          window.location.href = "tel:" + (selData.bridge_number || BRIDGE_NUMBER);
+        };
+        document.getElementById("dial-modal").style.display = "flex";
+      } catch (e) {
+        showModal("Network error. Please try again.");
+      } finally {
+        btn.disabled = false;
+        btn.innerText = origText;
+      }
     }
 
     // -----------------------------------------------------
