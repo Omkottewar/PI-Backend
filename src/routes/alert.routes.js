@@ -9,15 +9,11 @@ import {
   createQrRecord,
 } from '../services/qr.service.js';
 import { v4 as uuidv4 } from 'uuid';
-
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const router = Router();
-
 function loadAlertPageHtml() {
   try {
     return readFileSync(path.join(__dirname, '../public/alert-page.html'), 'utf8');
@@ -25,7 +21,6 @@ function loadAlertPageHtml() {
     return '<!DOCTYPE html><html><body><p>Alert page missing</p></body></html>';
   }
 }
-
 router.post(
   '/create-call',
   body('uniqueId').notEmpty(),
