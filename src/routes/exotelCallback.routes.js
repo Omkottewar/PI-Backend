@@ -10,37 +10,71 @@ const router = Router();
 // 10 gives us headroom for slow networks and IVR retries.
 const LOCATION_LOOKBACK_MINUTES = 10;
 
-// POST /api/exotel/call-completion
+// GET /api/exotel/call-completion?CallSid=...&CallFrom=...&CallTo=...&DialCallDuration=...&StartTime=...&EndTime=...
 //   Called by Exotel's call-completion webhook after the bridged call
-//   ends. Body carries CallSid, CallFrom, CallTo, DialCallDuration,
-//   StartTime, EndTime.
+//   ends. All parameters arrive on the query string (Exotel appends
+//   them to the URL when firing the webhook). We also fall back to
+//   HTTP headers for anything not present in the query, so this route
+//   is resilient to Exotel account configs that pass values either way.
 //
 //   Flow:
-//     1. Normalize From/To to E.164.
-//     2. Look up caller_activity keyed by (from_number, to_number) —
+//     1. Read every possible field from query + headers + body.
+//     2. Normalize From/To to E.164.
+//     3. Look up caller_activity keyed by (from_number, to_number) —
 //        this tells us which QR the call was routed through and gives
 //        us the qr_id needed to attribute the call to an owner.
-//     3. Look up the most recent alert_events row for that qr_id in
+//     4. Look up the most recent alert_events row for that qr_id in
 //        the last LOCATION_LOOKBACK_MINUTES minutes that has a real
 //        lat/lng (bystanders can deny the browser prompt).
-//     4. INSERT into call_logs with the merged data.
-router.post('/call-completion', async (req, res) => {
-  const {
-    CallSid,
-    CallFrom,
-    CallTo,
-    DialCallDuration,
-    StartTime,
-    EndTime,
-  } = req.body || {};
+//     5. INSERT into call_logs with the merged data.
+router.get('/call-completion', async (req, res) => {
+  // Read a field from query, then headers, then body — first non-empty
+  // wins. Case-insensitive: Exotel sends "CallSid" but some proxies
+  // downcase headers to "callsid".
+  const pick = (name) => {
+    const variants = [
+      name,
+      name.toLowerCase(),
+      name.toUpperCase(),
+      // camelCase → header-case (CallSid → call-sid, callsid)
+      name.replace(/([A-Z])/g, '-$1').replace(/^-/, '').toLowerCase(),
+    ];
+    for (const key of variants) {
+      const q = req.query?.[key];
+      if (q != null && q !== '') return q;
+      const h = req.headers?.[key];
+      if (h != null && h !== '') return h;
+      const b = req.body?.[key];
+      if (b != null && b !== '') return b;
+    }
+    return undefined;
+  };
 
-  console.log('[exotel/call-completion]', {
-    CallSid,
-    CallFrom,
-    CallTo,
-    DialCallDuration,
-    StartTime,
-    EndTime,
+  const CallSid = pick('CallSid');
+  const CallFrom = pick('CallFrom');
+  const CallTo = pick('CallTo');
+  const DialCallDuration = pick('DialCallDuration');
+  const StartTime = pick('StartTime');
+  const EndTime = pick('EndTime');
+  const DialCallStatus = pick('DialCallStatus');
+  const Direction = pick('Direction');
+
+  // Dump every source we looked at so debugging shows exactly what
+  // Exotel is actually sending and where.
+  console.log('[exotel/call-completion] full request dump', {
+    resolved: {
+      CallSid,
+      CallFrom,
+      CallTo,
+      DialCallDuration,
+      StartTime,
+      EndTime,
+      DialCallStatus,
+      Direction,
+    },
+    query: req.query,
+    headers: req.headers,
+    body: req.body && Object.keys(req.body).length ? req.body : undefined,
   });
 
   const fromNumber = normalizeIndianMobile(CallFrom);
@@ -53,15 +87,21 @@ router.post('/call-completion', async (req, res) => {
   const startTime = parseTs(StartTime);
   const endTime = parseTs(EndTime);
 
+  console.log('[callback] normalized', {
+    fromNumber,
+    toNumber,
+    callSid,
+    durationSec,
+    startTime,
+    endTime,
+  });
+
   try {
-    // Look up qr_id via caller_activity. If a caller called two different
-    // family members on the same QR quickly, to_number on caller_activity
-    // may not exactly match the earlier call's CallTo — so we order by
-    // last_call_at desc and take the freshest row.
+    // Step 1 — resolve qr_id via caller_activity
     let qrId = null;
     if (fromNumber && toNumber) {
       const act = await pool.query(
-        `SELECT qr_id
+        `SELECT qr_id, id, call_count, is_blocked
            FROM caller_activity
           WHERE from_number = $1
             AND to_number   = $2
@@ -69,18 +109,22 @@ router.post('/call-completion', async (req, res) => {
           LIMIT 1`,
         [fromNumber, toNumber]
       );
+      console.log('[callback] caller_activity lookup', {
+        matched: act.rows.length,
+        row: act.rows[0] || null,
+      });
       if (act.rows.length) qrId = act.rows[0].qr_id;
+    } else {
+      console.warn('[callback] skipping caller_activity lookup — missing fromNumber or toNumber');
     }
 
-    // Pull location from the most recent alert_events row for this QR
-    // within the lookback window. Only accept rows that actually carry
-    // a lat/lng — bystanders who denied the prompt still have a row.
+    // Step 2 — pull the most recent geolocation for this QR in the lookback window
     let lat = null;
     let lng = null;
     let accuracy = null;
     if (qrId) {
       const ev = await pool.query(
-        `SELECT latitude, longitude, accuracy_meters
+        `SELECT id, latitude, longitude, accuracy_meters, created_at
            FROM alert_events
           WHERE qr_id = $1
             AND created_at > NOW() - ($2 || ' minutes')::INTERVAL
@@ -90,6 +134,12 @@ router.post('/call-completion', async (req, res) => {
           LIMIT 1`,
         [qrId, String(LOCATION_LOOKBACK_MINUTES)]
       );
+      console.log('[callback] alert_events lookup', {
+        qr_id: qrId,
+        lookback_minutes: LOCATION_LOOKBACK_MINUTES,
+        matched: ev.rows.length,
+        row: ev.rows[0] || null,
+      });
       if (ev.rows.length) {
         lat = ev.rows[0].latitude;
         lng = ev.rows[0].longitude;
@@ -97,14 +147,16 @@ router.post('/call-completion', async (req, res) => {
       }
     }
 
-    await pool.query(
+    // Step 3 — insert into call_logs
+    const inserted = await pool.query(
       `INSERT INTO call_logs
          (qr_id, to_number, from_number, call_sid,
           duration, start_time, end_time,
           latitude, longitude, accuracy_meters,
           status,
           caller_number, receiver_number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id`,
       [
         qrId,
         toNumber || null,
@@ -116,24 +168,30 @@ router.post('/call-completion', async (req, res) => {
         lat,
         lng,
         accuracy,
-        'completed',
-        // Legacy columns — keep populating so existing dashboards still work.
+        DialCallStatus ? String(DialCallStatus) : 'completed',
         fromNumber || null,
         toNumber || null,
       ]
     );
 
+    console.log('[callback] call_logs inserted', {
+      id: inserted.rows[0].id,
+      qr_id: qrId,
+      has_location: lat != null && lng != null,
+      unattributed: !qrId,
+    });
+
     if (!qrId) {
       console.warn(
-        '[exotel/call-completion] no caller_activity match for ' +
-          `from=${fromNumber} to=${toNumber} sid=${callSid} — call log ` +
-          'inserted with qr_id NULL (unattributed).'
+        '[callback] UNATTRIBUTED — no caller_activity match for ' +
+          `from=${fromNumber} to=${toNumber} sid=${callSid}. ` +
+          'call_logs row created with qr_id NULL.'
       );
     }
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, call_log_id: inserted.rows[0].id });
   } catch (err) {
-    console.error('[exotel/call-completion] error:', err);
+    console.error('[callback] error:', err);
     return res.status(500).json({ error: err.message });
   }
 });

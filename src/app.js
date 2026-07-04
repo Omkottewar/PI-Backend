@@ -15,6 +15,47 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ─── Request / response tracer ──────────────────────────────────────────
+// Prints one line per incoming request (method + path + optional body
+// preview) and one per response (status + duration). Search Render logs
+// with `[req]` or `[res]` to filter. Bodies are truncated to 500 chars
+// and sensitive fields (otp, password, token, signatures) are redacted.
+function redact(obj) {
+  if (obj == null || typeof obj !== 'object') return obj;
+  const clone = Array.isArray(obj) ? [...obj] : { ...obj };
+  const SENSITIVE = new Set([
+    'otp', 'password', 'token', 'jwt', 'authorization',
+    'razorpay_signature', 'razorpay_payment_id', 'razorpay_order_id',
+  ]);
+  for (const k of Object.keys(clone)) {
+    if (SENSITIVE.has(k.toLowerCase())) {
+      clone[k] = '[REDACTED]';
+    } else if (clone[k] && typeof clone[k] === 'object') {
+      clone[k] = redact(clone[k]);
+    }
+  }
+  return clone;
+}
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  const { method, originalUrl } = req;
+  const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
+  let bodyPreview = '';
+  if (hasBody && req.body && Object.keys(req.body).length) {
+    try {
+      bodyPreview = ' body=' + JSON.stringify(redact(req.body)).slice(0, 500);
+    } catch { /* ignore */ }
+  }
+  console.log(`[req] ${method} ${originalUrl}${bodyPreview}`);
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    console.log(`[res] ${method} ${originalUrl} → ${res.statusCode} (${ms}ms)`);
+  });
+  next();
+});
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

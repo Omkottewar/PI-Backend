@@ -366,6 +366,7 @@ router.post('/alerts/:id/dismiss', requireAuth, async (req, res) => {
 
 router.get('/call-logs', requireAuth, async (req, res) => {
   const reveal = String(req.query.reveal || '').toLowerCase() === 'true';
+  console.log('[profile/call-logs] list', { userId: req.userId, reveal });
   try {
     const r = await pool.query(
       `SELECT
@@ -392,6 +393,11 @@ router.get('/call-logs', requireAuth, async (req, res) => {
        LIMIT 100`,
       [req.userId]
     );
+    console.log('[profile/call-logs] found', {
+      userId: req.userId,
+      count: r.rows.length,
+      firstId: r.rows[0]?.id,
+    });
     const items = r.rows.map((row) => ({
       ...row,
       from_number: reveal ? row.from_number : maskMobile(row.from_number),
@@ -411,6 +417,7 @@ router.get('/call-logs', requireAuth, async (req, res) => {
 // one with call_count=0 so the block still takes effect on the next call.
 router.post('/call-logs/:id/block', requireAuth, async (req, res) => {
   const logId = parseInt(req.params.id, 10);
+  console.log('[profile/call-logs/block]', { userId: req.userId, logId });
   if (!Number.isFinite(logId)) {
     return res.status(400).json({ error: 'Invalid id' });
   }
@@ -422,24 +429,30 @@ router.post('/call-logs/:id/block', requireAuth, async (req, res) => {
         WHERE cl.id = $1 AND q.user_id = $2`,
       [logId, req.userId]
     );
-    if (!check.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (!check.rows.length) {
+      console.warn('[profile/call-logs/block] log not found or not owned', { logId, userId: req.userId });
+      return res.status(404).json({ error: 'Not found' });
+    }
     const { qr_id, from_number, to_number } = check.rows[0];
+    console.log('[profile/call-logs/block] resolved', { qr_id, from_number, to_number });
     if (!qr_id || !from_number) {
       return res.status(400).json({
         error: 'Call log has no qr_id or from_number to attribute the block to',
       });
     }
 
-    await pool.query(
+    const upserted = await pool.query(
       `INSERT INTO caller_activity
          (qr_id, from_number, to_number, call_count,
           first_call_at, last_call_at, is_blocked, blocked_at)
        VALUES ($1, $2, $3, 0, NOW(), NOW(), true, NOW())
        ON CONFLICT (qr_id, from_number) DO UPDATE
          SET is_blocked = true,
-             blocked_at = NOW()`,
+             blocked_at = NOW()
+       RETURNING id, call_count, is_blocked`,
       [qr_id, from_number, to_number || null]
     );
+    console.log('[profile/call-logs/block] caller_activity upserted', upserted.rows[0]);
     return res.json({ ok: true });
   } catch (err) {
     console.error('[profile/call-logs/block] error:', err);
