@@ -21,4 +21,10 @@ export function assertConfig() {
   if (!config.databaseUrl) {
     console.warn('Warning: DATABASE_URL not set. Database operations will fail.');
   }
+  // Refuse to boot with the dev-only JWT secret in production — otherwise
+  // an env var typo silently signs tokens with a public string and anyone
+  // can forge admin tokens.
+  if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is required in production');
+  }
 }

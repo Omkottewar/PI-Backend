@@ -115,42 +115,47 @@ router.post(
     const { uniqueId } = req.params;
     const { kind, family_id } = req.body;
 
-    const qr = await getQrByUniqueId(uniqueId);
-    if (!qr) return res.status(404).json({ error: 'QR not found' });
-    if (qr.is_active === false) {
-      return res.status(400).json({ error: 'This QR is no longer active' });
-    }
-
-    let familyIdToStore = null;
-    if (kind === 'family') {
-      if (!family_id) {
-        return res.status(400).json({ error: 'family_id is required when kind = family' });
+    try {
+      const qr = await getQrByUniqueId(uniqueId);
+      if (!qr) return res.status(404).json({ error: 'QR not found' });
+      if (qr.is_active === false) {
+        return res.status(400).json({ error: 'This QR is no longer active' });
       }
-      const famRes = await pool.query(
-        `SELECT id FROM family_details WHERE id = $1 AND qr_id = $2`,
-        [family_id, qr.id]
+
+      let familyIdToStore = null;
+      if (kind === 'family') {
+        if (!family_id) {
+          return res.status(400).json({ error: 'family_id is required when kind = family' });
+        }
+        const famRes = await pool.query(
+          `SELECT id FROM family_details WHERE id = $1 AND qr_id = $2`,
+          [family_id, qr.id]
+        );
+        if (!famRes.rows.length) {
+          return res.status(400).json({ error: 'Contact does not belong to this QR' });
+        }
+        familyIdToStore = family_id;
+      }
+
+      await pool.query(
+        `UPDATE qrdata
+            SET selected_contact_kind = $1,
+                selected_family_id = $2,
+                selected_at = NOW()
+          WHERE id = $3`,
+        [kind, familyIdToStore, qr.id]
       );
-      if (!famRes.rows.length) {
-        return res.status(400).json({ error: 'Contact does not belong to this QR' });
-      }
-      familyIdToStore = family_id;
+
+      return res.json({
+        ok: true,
+        digits: qr.digits,
+        bridge_number: '02048563508',
+        ttl_minutes: 30,
+      });
+    } catch (err) {
+      console.error('[alert/:uniqueId/select] error:', err);
+      return res.status(500).json({ error: err.message });
     }
-
-    await pool.query(
-      `UPDATE qrdata
-          SET selected_contact_kind = $1,
-              selected_family_id = $2,
-              selected_at = NOW()
-        WHERE id = $3`,
-      [kind, familyIdToStore, qr.id]
-    );
-
-    return res.json({
-      ok: true,
-      digits: qr.digits,
-      bridge_number: '02048563508',
-      ttl_minutes: 30,
-    });
   }
 );
 
@@ -223,14 +228,19 @@ router.post(
 
 router.get('/:uniqueId/status', async (req, res) => {
   const { uniqueId } = req.params;
-  const qr = await getQrByUniqueId(uniqueId);
-  if (qr) {
-    const actDate = new Date(qr.date_of_activation || qr.created_at);
-    const diffDays = (new Date() - actDate) / (1000 * 60 * 60 * 24);
-    if (diffDays > 365) return res.json({ exists: true, expired: true });
-    return res.json({ exists: true, expired: false });
+  try {
+    const qr = await getQrByUniqueId(uniqueId);
+    if (qr) {
+      const actDate = new Date(qr.date_of_activation || qr.created_at);
+      const diffDays = (new Date() - actDate) / (1000 * 60 * 60 * 24);
+      if (diffDays > 365) return res.json({ exists: true, expired: true });
+      return res.json({ exists: true, expired: false });
+    }
+    return res.json({ exists: false, expired: false });
+  } catch (err) {
+    console.error('[alert/:uniqueId/status] error:', err);
+    return res.status(500).json({ error: err.message });
   }
-  return res.json({ exists: false, expired: false });
 });
 
 router.post('/:uniqueId/manual_activate',

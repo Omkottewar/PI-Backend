@@ -8,12 +8,17 @@ import { maskMobile } from '../utils/mask.js';
 const router = Router();
 
 router.get('/', requireAuth, async (req, res) => {
-  const r = await pool.query(
-    `SELECT id, name, mobile, email, age, address, created_at FROM users WHERE id = $1`,
-    [req.userId]
-  );
-  if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
-  return res.json(r.rows[0]);
+  try {
+    const r = await pool.query(
+      `SELECT id, name, mobile, email, age, address, created_at FROM users WHERE id = $1`,
+      [req.userId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
+    return res.json(r.rows[0]);
+  } catch (err) {
+    console.error('[profile GET] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 router.put(
@@ -28,56 +33,65 @@ router.put(
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    // Only update fields the client explicitly sent. An empty string clears
-    // the field; an absent key keeps the existing value. This is what the
-    // user expects when they erase the address box and hit Save.
-    const sets = [];
-    const params = [req.userId];
-    const push = (col, value) => {
-      params.push(value);
-      sets.push(`${col} = $${params.length}`);
-    };
+    try {
+      // Only update fields the client explicitly sent. An empty string clears
+      // the field; an absent key keeps the existing value.
+      const sets = [];
+      const params = [req.userId];
+      const push = (col, value) => {
+        params.push(value);
+        sets.push(`${col} = $${params.length}`);
+      };
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
-      const v = req.body.name;
-      push('name', v == null ? null : String(v).trim() || null);
-    }
-    if (Object.prototype.hasOwnProperty.call(req.body, 'email')) {
-      const v = req.body.email;
-      push('email', v == null || v === '' ? null : String(v).trim());
-    }
-    if (Object.prototype.hasOwnProperty.call(req.body, 'age')) {
-      const v = req.body.age;
-      push('age', v == null || v === '' ? null : Number(v));
-    }
-    if (Object.prototype.hasOwnProperty.call(req.body, 'address')) {
-      const v = req.body.address;
-      push('address', v == null ? null : String(v).trim() || null);
-    }
+      if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+        const v = req.body.name;
+        push('name', v == null ? null : String(v).trim() || null);
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, 'email')) {
+        const v = req.body.email;
+        push('email', v == null || v === '' ? null : String(v).trim());
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, 'age')) {
+        const v = req.body.age;
+        push('age', v == null || v === '' ? null : Number(v));
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, 'address')) {
+        const v = req.body.address;
+        push('address', v == null ? null : String(v).trim() || null);
+      }
 
-    if (sets.length === 0) {
-      const cur = await pool.query(
-        `SELECT id, name, mobile, email, age, address, created_at FROM users WHERE id = $1`,
-        [req.userId]
+      if (sets.length === 0) {
+        const cur = await pool.query(
+          `SELECT id, name, mobile, email, age, address, created_at FROM users WHERE id = $1`,
+          [req.userId]
+        );
+        if (!cur.rows.length) return res.status(404).json({ error: 'User not found' });
+        return res.json(cur.rows[0]);
+      }
+
+      const r = await pool.query(
+        `UPDATE users SET ${sets.join(', ')}
+         WHERE id = $1
+         RETURNING id, name, mobile, email, age, address, created_at`,
+        params
       );
-      if (!cur.rows.length) return res.status(404).json({ error: 'User not found' });
-      return res.json(cur.rows[0]);
+      if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
+      return res.json(r.rows[0]);
+    } catch (err) {
+      console.error('[profile PUT] error:', err);
+      return res.status(500).json({ error: err.message });
     }
-
-    const r = await pool.query(
-      `UPDATE users SET ${sets.join(', ')}
-       WHERE id = $1
-       RETURNING id, name, mobile, email, age, address, created_at`,
-      params
-    );
-    if (!r.rows.length) return res.status(404).json({ error: 'User not found' });
-    return res.json(r.rows[0]);
   }
 );
 
 router.get('/contacts', requireAuth, async (req, res) => {
-  const r = await pool.query(`SELECT * FROM user_contacts WHERE user_id = $1 ORDER BY id`, [req.userId]);
-  return res.json({ items: r.rows });
+  try {
+    const r = await pool.query(`SELECT * FROM user_contacts WHERE user_id = $1 ORDER BY id`, [req.userId]);
+    return res.json({ items: r.rows });
+  } catch (err) {
+    console.error('[profile/contacts GET] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 router.post(
@@ -143,9 +157,14 @@ router.put(
 );
 
 router.delete('/contacts/:id', requireAuth, async (req, res) => {
-  const r = await pool.query(`DELETE FROM user_contacts WHERE id = $1 AND user_id = $2 RETURNING id`, [req.params.id, req.userId]);
-  if (!r.rows.length) return res.status(404).json({ error: 'Contact not found' });
-  return res.json({ success: true });
+  try {
+    const r = await pool.query(`DELETE FROM user_contacts WHERE id = $1 AND user_id = $2 RETURNING id`, [req.params.id, req.userId]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Contact not found' });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[profile/contacts DELETE] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // GET list of all users (for notification admin lookup)
@@ -197,7 +216,9 @@ router.get('/caller-activity', requireAuth, async (req, res) => {
           ca.qr_id,
           q.vehicle_number,
           q.digits,
-          ca.caller_number,
+          ca.from_number,
+          ca.to_number,
+          ca.last_call_sid,
           ca.call_count,
           ca.first_call_at,
           ca.last_call_at,
@@ -212,7 +233,12 @@ router.get('/caller-activity', requireAuth, async (req, res) => {
     );
     const items = r.rows.map((row) => ({
       ...row,
-      caller_number: reveal ? row.caller_number : maskMobile(row.caller_number),
+      from_number: reveal ? row.from_number : maskMobile(row.from_number),
+      to_number: reveal ? row.to_number : maskMobile(row.to_number),
+      // Keep the old field name for backward compat with clients that
+      // still read caller_number — will be removed once mobile is on
+      // from_number everywhere.
+      caller_number: reveal ? row.from_number : maskMobile(row.from_number),
     }));
     return res.json({ items });
   } catch (err) {
@@ -309,19 +335,116 @@ router.post('/alerts/:id/dismiss', requireAuth, async (req, res) => {
   if (!Number.isFinite(alertId)) {
     return res.status(400).json({ error: 'Invalid id' });
   }
-  const check = await pool.query(
-    `SELECT ae.id
-       FROM alert_events ae
-       JOIN qrdata q ON q.id = ae.qr_id
-      WHERE ae.id = $1 AND q.user_id = $2`,
-    [alertId, req.userId]
-  );
-  if (!check.rows.length) return res.status(404).json({ error: 'Not found' });
-  await pool.query(
-    `UPDATE alert_events SET seen_at = NOW() WHERE id = $1`,
-    [alertId]
-  );
-  return res.json({ ok: true });
+  try {
+    const check = await pool.query(
+      `SELECT ae.id
+         FROM alert_events ae
+         JOIN qrdata q ON q.id = ae.qr_id
+        WHERE ae.id = $1 AND q.user_id = $2`,
+      [alertId, req.userId]
+    );
+    if (!check.rows.length) return res.status(404).json({ error: 'Not found' });
+    await pool.query(
+      `UPDATE alert_events SET seen_at = NOW() WHERE id = $1`,
+      [alertId]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[profile/alerts/dismiss] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Call logs (owner-facing) ────────────────────────────────────────────
+// Backed by call_logs rows written by the /api/exotel/call-completion
+// webhook. Only rows that could be attributed to a QR (qr_id NOT NULL)
+// are surfaced here — orphaned rows (legacy /alert/create-call inserts,
+// or Exotel completions that didn't match any caller_activity) stay
+// hidden from the owner UI.
+//
+// Numbers are masked by default; pass ?reveal=true for full values.
+
+router.get('/call-logs', requireAuth, async (req, res) => {
+  const reveal = String(req.query.reveal || '').toLowerCase() === 'true';
+  try {
+    const r = await pool.query(
+      `SELECT
+          cl.id,
+          cl.qr_id,
+          q.vehicle_number,
+          cl.call_sid,
+          cl.to_number,
+          cl.from_number,
+          cl.duration,
+          cl.start_time,
+          cl.end_time,
+          cl.latitude,
+          cl.longitude,
+          cl.accuracy_meters,
+          COALESCE(ca.is_blocked, false) AS is_blocked
+        FROM call_logs cl
+        JOIN qrdata q ON q.id = cl.qr_id
+        LEFT JOIN caller_activity ca
+          ON ca.qr_id = cl.qr_id AND ca.from_number = cl.from_number
+       WHERE q.user_id = $1
+         AND cl.qr_id IS NOT NULL
+       ORDER BY cl.start_time DESC NULLS LAST, cl.id DESC
+       LIMIT 100`,
+      [req.userId]
+    );
+    const items = r.rows.map((row) => ({
+      ...row,
+      from_number: reveal ? row.from_number : maskMobile(row.from_number),
+      to_number: reveal ? row.to_number : maskMobile(row.to_number),
+    }));
+    return res.json({ items });
+  } catch (err) {
+    console.error('[profile/call-logs] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Block the caller whose (qr_id, from_number) matches this call log row.
+// Looks up the caller_activity row that /exotel/lookup created for that
+// pair and flips is_blocked. If no matching row exists (edge case — the
+// call log's from_number was never seen by /exotel/lookup), we create
+// one with call_count=0 so the block still takes effect on the next call.
+router.post('/call-logs/:id/block', requireAuth, async (req, res) => {
+  const logId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(logId)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  try {
+    const check = await pool.query(
+      `SELECT cl.qr_id, cl.from_number, cl.to_number
+         FROM call_logs cl
+         JOIN qrdata q ON q.id = cl.qr_id
+        WHERE cl.id = $1 AND q.user_id = $2`,
+      [logId, req.userId]
+    );
+    if (!check.rows.length) return res.status(404).json({ error: 'Not found' });
+    const { qr_id, from_number, to_number } = check.rows[0];
+    if (!qr_id || !from_number) {
+      return res.status(400).json({
+        error: 'Call log has no qr_id or from_number to attribute the block to',
+      });
+    }
+
+    await pool.query(
+      `INSERT INTO caller_activity
+         (qr_id, from_number, to_number, call_count,
+          first_call_at, last_call_at, is_blocked, blocked_at)
+       VALUES ($1, $2, $3, 0, NOW(), NOW(), true, NOW())
+       ON CONFLICT (qr_id, from_number) DO UPDATE
+         SET is_blocked = true,
+             blocked_at = NOW()`,
+      [qr_id, from_number, to_number || null]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[profile/call-logs/block] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

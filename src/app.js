@@ -9,6 +9,7 @@ import callHistoryRoutes from './routes/callHistory.routes.js';
 import appRoutes from './routes/app.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import exotelRoutes from './routes/exotel.routes.js';
+import exotelCallbackRoutes from './routes/exotelCallback.routes.js';
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api/call-history', callHistoryRoutes);
 app.use('/api/app', appRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/exotel', exotelRoutes);
+app.use('/api/exotel', exotelCallbackRoutes);
 
 
 import path from 'path';
