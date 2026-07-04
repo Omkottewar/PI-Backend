@@ -53,7 +53,12 @@ function exotelResponse(numbers) {
 //      Exotel's Passthru "on failure" branch should point at a
 //      "no active contact" playback + hangup applet.
 router.get('/lookup', async (req, res) => {
-  const digits = String(req.query.digits || '').trim();
+  // Exotel sometimes URL-encodes the gathered digits WITH quotes around
+  // them (e.g. digits='"10013"' instead of '10013') when it substitutes
+  // variables into the Passthru URL template. Strip everything that isn't
+  // a digit so we compare cleanly against qrdata.digits.
+  const digitsRaw = String(req.query.digits || '').trim();
+  const digits = digitsRaw.replace(/\D/g, '');
   const callSid = String(req.query.CallSid || '').trim();
   const callerNumberRaw = String(req.query.CallFrom || '').trim();
   const fromNumber = normalizeIndianMobile(callerNumberRaw);
@@ -62,6 +67,7 @@ router.get('/lookup', async (req, res) => {
     CallSid: callSid,
     CallFrom: fromNumber,
     digits,
+    digitsRaw: digitsRaw !== digits ? digitsRaw : undefined,
   });
 
   if (!digits) {
