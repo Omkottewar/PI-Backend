@@ -235,10 +235,6 @@ router.get('/caller-activity', requireAuth, async (req, res) => {
       ...row,
       from_number: reveal ? row.from_number : maskMobile(row.from_number),
       to_number: reveal ? row.to_number : maskMobile(row.to_number),
-      // Keep the old field name for backward compat with clients that
-      // still read caller_number — will be removed once mobile is on
-      // from_number everywhere.
-      caller_number: reveal ? row.from_number : maskMobile(row.from_number),
     }));
     return res.json({ items });
   } catch (err) {

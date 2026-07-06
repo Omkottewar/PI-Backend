@@ -153,9 +153,8 @@ router.get('/call-completion', async (req, res) => {
          (qr_id, to_number, from_number, call_sid,
           duration, start_time, end_time,
           latitude, longitude, accuracy_meters,
-          status,
-          caller_number, receiver_number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
         qrId,
@@ -169,8 +168,6 @@ router.get('/call-completion', async (req, res) => {
         lng,
         accuracy,
         DialCallStatus ? String(DialCallStatus) : 'completed',
-        fromNumber || null,
-        toNumber || null,
       ]
     );
 
