@@ -97,9 +97,29 @@ router.get('/call-completion', async (req, res) => {
   });
 
   try {
-    // Step 1 — resolve qr_id via caller_activity
+    // Step 1a — prefer the pending call_logs row inserted by /exotel/lookup
+    // during this exact call. This is race-free because call_sid is unique.
     let qrId = null;
-    if (fromNumber && toNumber) {
+    let pendingId = null;
+    if (callSid) {
+      const pending = await pool.query(
+        `SELECT id, qr_id FROM call_logs WHERE call_sid = $1 LIMIT 1`,
+        [callSid]
+      );
+      console.log('[callback] pending call_logs lookup by call_sid', {
+        matched: pending.rows.length,
+        row: pending.rows[0] || null,
+      });
+      if (pending.rows.length) {
+        pendingId = pending.rows[0].id;
+        qrId = pending.rows[0].qr_id;
+      }
+    }
+
+    // Step 1b — legacy fallback: attribute via caller_activity (from, to).
+    // Only used if there's no pending row (lookup didn't fire, or CallSid
+    // mismatch between the two Exotel applets).
+    if (!qrId && fromNumber && toNumber) {
       const act = await pool.query(
         `SELECT qr_id, id, call_count, is_blocked
            FROM caller_activity
@@ -109,13 +129,14 @@ router.get('/call-completion', async (req, res) => {
           LIMIT 1`,
         [fromNumber, toNumber]
       );
-      console.log('[callback] caller_activity lookup', {
+      console.log('[callback] fallback caller_activity lookup', {
         matched: act.rows.length,
         row: act.rows[0] || null,
       });
       if (act.rows.length) qrId = act.rows[0].qr_id;
-    } else {
-      console.warn('[callback] skipping caller_activity lookup — missing fromNumber or toNumber');
+    }
+    if (!qrId && !pendingId) {
+      console.warn('[callback] no attribution match — call_logs will be inserted with qr_id NULL');
     }
 
     // Step 2 — pull the most recent geolocation for this QR in the lookback window
@@ -147,46 +168,93 @@ router.get('/call-completion', async (req, res) => {
       }
     }
 
-    // Step 3 — insert into call_logs
-    const inserted = await pool.query(
-      `INSERT INTO call_logs
-         (qr_id, to_number, from_number, call_sid,
-          duration, start_time, end_time,
-          latitude, longitude, accuracy_meters,
-          status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id`,
-      [
-        qrId,
-        toNumber || null,
-        fromNumber || null,
-        callSid,
-        durationSec,
-        startTime,
-        endTime,
-        lat,
-        lng,
-        accuracy,
-        DialCallStatus ? String(DialCallStatus) : 'completed',
-      ]
-    );
+    // Step 3 — write the call log.
+    // If we have a pending row from lookup, UPDATE it in place (race-free).
+    // If not (edge case), INSERT a fresh row.
+    const statusStr = DialCallStatus ? String(DialCallStatus) : 'completed';
+    let callLogId;
 
-    console.log('[callback] call_logs inserted', {
-      id: inserted.rows[0].id,
-      qr_id: qrId,
-      has_location: lat != null && lng != null,
-      unattributed: !qrId,
-    });
+    if (pendingId) {
+      const updated = await pool.query(
+        `UPDATE call_logs
+            SET duration        = $2,
+                start_time      = COALESCE($3, start_time),
+                end_time        = $4,
+                latitude        = COALESCE($5, latitude),
+                longitude       = COALESCE($6, longitude),
+                accuracy_meters = COALESCE($7, accuracy_meters),
+                status          = $8,
+                to_number       = COALESCE(to_number, $9),
+                from_number     = COALESCE(from_number, $10)
+          WHERE id = $1
+        RETURNING id`,
+        [
+          pendingId,
+          durationSec,
+          startTime,
+          endTime,
+          lat,
+          lng,
+          accuracy,
+          statusStr,
+          toNumber || null,
+          fromNumber || null,
+        ]
+      );
+      callLogId = updated.rows[0].id;
+      console.log('[callback] updated pending call_log', {
+        id: callLogId,
+        qr_id: qrId,
+        has_location: lat != null && lng != null,
+      });
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO call_logs
+           (qr_id, to_number, from_number, call_sid,
+            duration, start_time, end_time,
+            latitude, longitude, accuracy_meters,
+            status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (call_sid) DO UPDATE
+           SET duration        = EXCLUDED.duration,
+               end_time        = EXCLUDED.end_time,
+               latitude        = COALESCE(call_logs.latitude, EXCLUDED.latitude),
+               longitude       = COALESCE(call_logs.longitude, EXCLUDED.longitude),
+               accuracy_meters = COALESCE(call_logs.accuracy_meters, EXCLUDED.accuracy_meters),
+               status          = EXCLUDED.status
+         RETURNING id`,
+        [
+          qrId,
+          toNumber || null,
+          fromNumber || null,
+          callSid,
+          durationSec,
+          startTime,
+          endTime,
+          lat,
+          lng,
+          accuracy,
+          statusStr,
+        ]
+      );
+      callLogId = inserted.rows[0].id;
+      console.log('[callback] inserted call_log (no pending row)', {
+        id: callLogId,
+        qr_id: qrId,
+        has_location: lat != null && lng != null,
+        unattributed: !qrId,
+      });
+    }
 
     if (!qrId) {
       console.warn(
-        '[callback] UNATTRIBUTED — no caller_activity match for ' +
+        '[callback] UNATTRIBUTED — no pending row and no caller_activity match. ' +
           `from=${fromNumber} to=${toNumber} sid=${callSid}. ` +
-          'call_logs row created with qr_id NULL.'
+          'call_logs row exists but qr_id is NULL.'
       );
     }
 
-    return res.json({ ok: true, call_log_id: inserted.rows[0].id });
+    return res.json({ ok: true, call_log_id: callLogId });
   } catch (err) {
     console.error('[callback] error:', err);
     return res.status(500).json({ error: err.message });

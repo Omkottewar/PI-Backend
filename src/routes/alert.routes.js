@@ -21,48 +21,11 @@ function loadAlertPageHtml() {
     return '<!DOCTYPE html><html><body><p>Alert page missing</p></body></html>';
   }
 }
-router.post(
-  '/create-call',
-  body('uniqueId').notEmpty(),
-  body('target').isIn(['owner', 'family']),
-  body('family_detail_id').optional().isInt(),
-  body('caller').optional().trim(),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-    const { uniqueId, target, family_detail_id } = req.body;
-    const caller = req.body.caller || '0000000000';
-    const qr = await getQrByUniqueId(uniqueId);
-    if (!qr) return res.status(404).json({ error: 'QR not found' });
-
-    let receiverNumber;
-    if (target === 'owner') {
-      receiverNumber = qr.mobile;
-    } else {
-      if (!family_detail_id) return res.status(400).json({ error: 'family_detail_id required' });
-      const member = await getFamilyMember(qr.id, family_detail_id);
-      if (!member) return res.status(404).json({ error: 'Contact not found' });
-      receiverNumber = member.phone;
-    }
-
-    try {
-      // Record the scan/call attempt. The actual dialing happens on the
-      // scanner's device via the tel: protocol — this endpoint only logs
-      // that someone tapped Call so we have a scan trail.
-      await pool.query(
-        'INSERT INTO call_logs (caller_number, receiver_number, status, start_time) VALUES ($1, $2, $3, NOW())',
-        [caller, receiverNumber, 'initiated']
-      );
-      return res.json({ ok: true });
-    } catch (e) {
-      console.error('Call log insert failed:', e);
-      // Logging failure shouldn't block the user from being able to call.
-      // Return ok so the client opens the dialer regardless.
-      return res.json({ ok: true });
-    }
-  }
-);
+// NOTE: The legacy POST /alert/create-call endpoint that used to write
+// scan-tap events to call_logs has been retired. Its role is now filled by
+// POST /alert/:uniqueId/event (which also captures the bystander's
+// geolocation) and the two-phase call_logs pipeline (pending row on
+// /exotel/lookup, UPDATE on /api/exotel/call-completion).
 
 router.post(
   '/:uniqueId/verify',
@@ -231,10 +194,15 @@ router.get('/:uniqueId/status', async (req, res) => {
   try {
     const qr = await getQrByUniqueId(uniqueId);
     if (qr) {
+      // A QR is "expired" from the scanner's perspective if EITHER:
+      //   • the is_active flag is false (manual deactivation, or the
+      //     12h scheduler flipped it because it aged past 365 days), OR
+      //   • the date math says >365 days since activation (safety net for
+      //     the window between actual expiry and scheduler firing).
       const actDate = new Date(qr.date_of_activation || qr.created_at);
       const diffDays = (new Date() - actDate) / (1000 * 60 * 60 * 24);
-      if (diffDays > 365) return res.json({ exists: true, expired: true });
-      return res.json({ exists: true, expired: false });
+      const expired = qr.is_active === false || diffDays > 365;
+      return res.json({ exists: true, expired });
     }
     return res.json({ exists: false, expired: false });
   } catch (err) {
@@ -288,9 +256,11 @@ router.post('/:uniqueId/manual_activate',
       return res.status(500).json({ error: err.message });
     }
 
-    // Use internal QR service
+    // Use internal QR service — pass the pre-allocated digits from
+    // manual_qr so the freshly-created qrdata row carries the same
+    // extension code that's already printed on the physical sticker.
     try {
-      await createQrRecord({
+      const created = await createQrRecord({
         userId,
         uniqueId,
         razorpay_order_id: 'manual',
@@ -303,10 +273,17 @@ router.post('/:uniqueId/manual_activate',
         blood_group: null,
         family,
         isManual: true,
+        preAllocatedDigits: manualQr.digits || null,
       });
       // Deactivate manual QR
       await pool.query(`UPDATE manual_qr SET is_active = false WHERE id = $1`, [manualQr.id]);
-      return res.json({ success: true });
+      return res.json({
+        success: true,
+        unique_id: uniqueId,
+        digits: created.digits,
+        mobile,
+        message: 'QR linked successfully. You can now sign into the app with your mobile number.',
+      });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }

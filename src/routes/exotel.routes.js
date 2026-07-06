@@ -160,6 +160,25 @@ router.get('/lookup', async (req, res) => {
       return res.status(404).json({ error: 'target number malformed' });
     }
 
+    // Insert a "pending" call_logs row keyed by call_sid. The completion
+    // webhook UPDATEs this same row by call_sid, giving us race-free
+    // attribution even when a caller dials multiple contacts rapidly.
+    // ON CONFLICT DO NOTHING handles Exotel Passthru retries idempotently.
+    if (callSid) {
+      try {
+        await pool.query(
+          `INSERT INTO call_logs
+             (qr_id, to_number, from_number, call_sid, start_time, status)
+           VALUES ($1, $2, $3, $4, NOW(), 'in-progress')
+           ON CONFLICT (call_sid) DO NOTHING`,
+          [row.id, toE164, fromNumber, callSid]
+        );
+      } catch (err) {
+        // Never break the routing path over a logging failure.
+        console.error('[exotel/lookup] pending call_log insert failed:', err);
+      }
+    }
+
     return res.json(exotelResponse([toE164]));
   } catch (err) {
     console.error('[exotel/lookup] error:', err);

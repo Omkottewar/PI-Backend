@@ -37,6 +37,13 @@ router.post(
   body('family.*.name').trim().notEmpty(),
   body('family.*.phone').trim().notEmpty(),
   body('family.*.relation').custom((v) => validateFamilyRelation(v)),
+  // Shipping address for the physical sticker.
+  body('shipping_address_line1').trim().notEmpty().withMessage('Address is required'),
+  body('shipping_address_line2').optional({ nullable: true }).isString().trim(),
+  body('shipping_city').trim().notEmpty().withMessage('City is required'),
+  body('shipping_state').trim().notEmpty().withMessage('State is required'),
+  body('shipping_pincode').trim().matches(/^[0-9]{6}$/).withMessage('Pincode must be 6 digits'),
+  body('shipping_country').optional({ nullable: true }).isString().trim(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

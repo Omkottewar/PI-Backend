@@ -9,6 +9,7 @@ import appRoutes from './routes/app.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import exotelRoutes from './routes/exotel.routes.js';
 import exotelCallbackRoutes from './routes/exotelCallback.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 
 const app = express();
 
@@ -66,6 +67,7 @@ app.use('/api/app', appRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/exotel', exotelRoutes);
 app.use('/api/exotel', exotelCallbackRoutes);
+app.use('/api/admin', adminRoutes);
 
 
 import path from 'path';
@@ -75,6 +77,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Alert web + APIs — GET page, POST verify, POST call */
 app.use('/alert', alertRoutes);
+
+// Admin single-page UI — the /api/admin/* routes are the actual backend.
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/admin.html'));
+});
 
 app.get('/call/:callId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/receiver-link.html'));

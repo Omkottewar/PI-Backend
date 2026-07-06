@@ -22,6 +22,13 @@ export async function createQrRecord({
   blood_group,
   family,
   isManual = false,
+  preAllocatedDigits = null,          // used by manual-activate path
+  shipping_address_line1 = null,
+  shipping_address_line2 = null,
+  shipping_city = null,
+  shipping_state = null,
+  shipping_pincode = null,
+  shipping_country = null,
 }) {
   // Raj - Commented for testing purpose
   // if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
@@ -58,30 +65,65 @@ export async function createQrRecord({
   try {
     await client.query('BEGIN');
 
-    const sequenceName = isManual ? 'qrdata_digits_manual_seq' : 'qrdata_digits_auto_seq';
-    let digits;
-    try {
-      const seqRes = await client.query(
-        `SELECT nextval('${sequenceName}')::text AS digits`
-      );
-      digits = seqRes.rows[0].digits;
-    } catch (e) {
-      if (String(e.message || '').toLowerCase().includes('reached maximum value')) {
-        const bucket = isManual ? 'manual (70000-999999)' : 'auto (10000-69999)';
-        const err = new Error(`QR short-code space exhausted for ${bucket}`);
-        err.statusCode = 503;
-        throw err;
+    // Digit allocation strategy:
+    //   - Manual QR activation: use the digits pre-allocated on manual_qr
+    //     at MINT time. Physical stickers are already printed with them.
+    //   - Auto (paid) QR: allocate a fresh value from qrdata_digits_auto_seq.
+    //   - Everything else (defensive): fall back to allocating from the
+    //     appropriate sequence.
+    let digits = preAllocatedDigits;
+    if (!digits) {
+      const sequenceName = isManual ? 'qrdata_digits_manual_seq' : 'qrdata_digits_auto_seq';
+      try {
+        const seqRes = await client.query(
+          `SELECT nextval('${sequenceName}')::text AS digits`
+        );
+        digits = seqRes.rows[0].digits;
+      } catch (e) {
+        if (String(e.message || '').toLowerCase().includes('reached maximum value')) {
+          const bucket = isManual ? 'manual (70000-999999)' : 'auto (10000-69999)';
+          const err = new Error(`QR short-code space exhausted for ${bucket}`);
+          err.statusCode = 503;
+          throw err;
+        }
+        throw e;
       }
-      throw e;
     }
 
     const qrRes = await client.query(
-      `INSERT INTO qrdata (user_id, unique_id, name, mobile, email, vehicle_number, blood_group, digits, is_manual)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO qrdata (
+         user_id, unique_id, name, mobile, email,
+         vehicle_number, blood_group, digits, is_manual,
+         shipping_address_line1, shipping_address_line2,
+         shipping_city, shipping_state, shipping_pincode, shipping_country
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
-      [userId, uniqueId, name.trim(), mobile.trim(), email.trim(), vehicleNorm, blood_group || null, digits, isManual]
+      [
+        userId, uniqueId, name.trim(), mobile.trim(), email.trim(),
+        vehicleNorm, blood_group || null, digits, isManual,
+        shipping_address_line1 ? String(shipping_address_line1).trim() : null,
+        shipping_address_line2 ? String(shipping_address_line2).trim() : null,
+        shipping_city ? String(shipping_city).trim() : null,
+        shipping_state ? String(shipping_state).trim() : null,
+        shipping_pincode ? String(shipping_pincode).trim() : null,
+        shipping_country ? String(shipping_country).trim() : 'India',
+      ]
     );
     const qr = qrRes.rows[0];
+
+    // Backfill users row from the QR form input. COALESCE so we only fill
+    // fields the user hasn't already set elsewhere — never overwrite an
+    // existing profile value. Fixes the empty-Profile-tab bug where a
+    // user who created a QR still saw NULL name/email on the Profile tab
+    // because those fields only landed in qrdata (denormalized snapshot).
+    await client.query(
+      `UPDATE users
+          SET name  = COALESCE(users.name,  $2),
+              email = COALESCE(NULLIF(users.email, ''), NULLIF($3, ''))
+        WHERE id = $1`,
+      [userId, name.trim(), email.trim()]
+    );
 
     for (const f of family) {
       await client.query(

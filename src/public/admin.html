@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QR 4 Emergency — Admin</title>
+  <style>
+    :root {
+      --bg: #06090F;
+      --card: #0F1626;
+      --card2: #161F33;
+      --border: rgba(255, 255, 255, 0.10);
+      --hairline: rgba(255, 255, 255, 0.06);
+      --text: #F1F5F9;
+      --text2: #94A3B8;
+      --text3: #64748B;
+      --primary: #FF7A00;
+      --primary2: #FFB547;
+      --green: #10B981;
+      --red: #EF4444;
+      --amber: #F59E0B;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px; line-height: 1.5;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 24px; border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(255,122,0,0.06), transparent);
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: -0.4px; }
+    header h1 span { color: var(--primary); }
+    header .actions button { background: transparent; border: 1px solid var(--border);
+      color: var(--text2); padding: 8px 14px; border-radius: 8px; cursor: pointer;
+      font-size: 12px; font-weight: 700; }
+    header .actions button:hover { border-color: var(--primary); color: var(--primary); }
+
+    .card { background: var(--card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+    .card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 800; }
+    .muted { color: var(--text2); font-size: 12px; }
+
+    input[type="text"], input[type="password"], input[type="number"], textarea {
+      background: var(--card2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; font-size: 14px; width: 100%;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--primary); }
+    label { display: block; font-size: 11px; color: var(--text2); font-weight: 700;
+      letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; }
+
+    button.primary { background: var(--primary); color: white; border: none;
+      padding: 11px 18px; border-radius: 10px; font-weight: 800; font-size: 14px;
+      cursor: pointer; }
+    button.primary:hover { background: #E56D00; }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.ghost { background: transparent; border: 1px solid var(--border);
+      color: var(--text); padding: 9px 14px; border-radius: 10px; font-weight: 700;
+      cursor: pointer; font-size: 13px; }
+    button.danger { background: rgba(239,68,68,0.14); border: 1px solid rgba(239,68,68,0.4);
+      color: var(--red); padding: 6px 10px; border-radius: 8px; font-weight: 700;
+      cursor: pointer; font-size: 11px; }
+
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stat { background: var(--card2); border: 1px solid var(--hairline);
+      border-radius: 12px; padding: 16px; }
+    .stat .label { color: var(--text2); font-size: 10px; font-weight: 800;
+      letter-spacing: 1.4px; text-transform: uppercase; }
+    .stat .value { font-size: 28px; font-weight: 900; margin-top: 4px;
+      font-variant-numeric: tabular-nums; }
+    .stat.total .value { color: var(--text); }
+    .stat.unactivated .value { color: var(--primary); }
+    .stat.activated .value { color: var(--green); }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr; } }
+
+    .filters { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+    .filters .grow { flex: 1; min-width: 200px; }
+    .chip-btn { background: var(--card2); border: 1px solid var(--border);
+      color: var(--text2); padding: 8px 12px; border-radius: 999px; cursor: pointer;
+      font-size: 11px; font-weight: 800; letter-spacing: 0.4px; }
+    .chip-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    thead th { text-align: left; padding: 10px 8px; color: var(--text2);
+      border-bottom: 1px solid var(--border); font-size: 10.5px; letter-spacing: 1px;
+      text-transform: uppercase; font-weight: 800; }
+    tbody td { padding: 12px 8px; border-bottom: 1px solid var(--hairline);
+      font-variant-numeric: tabular-nums; vertical-align: middle; }
+    tbody tr:hover { background: rgba(255,122,0,0.03); }
+    .code { font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+      font-size: 12px; background: var(--card2); padding: 2px 6px; border-radius: 6px;
+      color: var(--text); border: 1px solid var(--hairline); }
+    .pill { padding: 3px 9px; border-radius: 999px; font-size: 10px;
+      font-weight: 800; letter-spacing: 0.6px; }
+    .pill.active { background: rgba(255,122,0,0.14); color: var(--primary);
+      border: 1px solid rgba(255,122,0,0.35); }
+    .pill.done { background: rgba(16,185,129,0.14); color: var(--green);
+      border: 1px solid rgba(16,185,129,0.35); }
+    .pill.dead { background: rgba(148,163,184,0.14); color: var(--text2);
+      border: 1px solid rgba(148,163,184,0.30); }
+
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      display: none; align-items: center; justify-content: center; z-index: 100; }
+    .modal-bg.open { display: flex; }
+    .modal { background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 24px; width: 90%; max-width: 480px; }
+    .modal h3 { margin: 0 0 10px; font-size: 16px; font-weight: 900; }
+
+    .err { background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.35);
+      color: var(--red); padding: 10px 12px; border-radius: 10px; font-size: 12.5px;
+      margin-bottom: 12px; }
+    .success { background: rgba(16,185,129,0.10); border: 1px solid rgba(16,185,129,0.35);
+      color: var(--green); padding: 10px 12px; border-radius: 10px; font-size: 12.5px;
+      margin-bottom: 12px; }
+
+    #login-screen { min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; padding: 20px; }
+    #login-card { max-width: 400px; width: 100%; }
+    .hidden { display: none !important; }
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+    .action-row { display: flex; gap: 6px; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<!-- Login screen -->
+<div id="login-screen">
+  <div class="card" id="login-card">
+    <h2>Admin Sign In</h2>
+    <p class="muted" style="margin-top: -6px; margin-bottom: 16px;">
+      Enter the admin API key. Ask your backend operator if you don't have one.
+    </p>
+    <div id="login-err" class="err hidden"></div>
+    <label>Admin API Key</label>
+    <input type="password" id="login-key" placeholder="ADMIN_API_KEY" autocomplete="off" />
+    <div style="height: 12px;"></div>
+    <button class="primary" id="login-btn" style="width: 100%;">Sign In</button>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" class="hidden">
+  <header>
+    <h1>QR 4 Emergency <span>· Admin</span></h1>
+    <div class="actions">
+      <button id="logout-btn">Sign Out</button>
+    </div>
+  </header>
+  <div class="container">
+
+    <!-- Stats -->
+    <div class="card">
+      <h2>Manual QR Overview</h2>
+      <div class="stats" id="stats-grid">
+        <div class="stat total"><div class="label">Total Minted</div><div class="value" id="stat-total">—</div></div>
+        <div class="stat unactivated"><div class="label">Awaiting Activation</div><div class="value" id="stat-unactivated">—</div></div>
+        <div class="stat activated"><div class="label">Activated</div><div class="value" id="stat-activated">—</div></div>
+      </div>
+    </div>
+
+    <!-- Mint form -->
+    <div class="card">
+      <h2>Mint New Manual QRs</h2>
+      <p class="muted" style="margin-top: -6px; margin-bottom: 14px;">
+        Creates a batch. Each row gets a fresh UUID, a 5-digit extension code
+        (auto-incremented from the manual sequence), and either an auto-generated
+        referral code or one from your custom list.
+      </p>
+      <div id="mint-err" class="err hidden"></div>
+      <div id="mint-success" class="success hidden"></div>
+      <div class="grid2">
+        <div>
+          <label>How Many</label>
+          <input type="number" id="mint-count" min="1" max="500" value="10" />
+        </div>
+        <div>
+          <label>Prefix (optional)</label>
+          <input type="text" id="mint-prefix" placeholder="e.g., BATCH-2026- " maxlength="20" />
+        </div>
+      </div>
+      <div style="height: 12px;"></div>
+      <label>Custom Referral Codes (optional, one per line — must match count)</label>
+      <textarea id="mint-custom" rows="3" placeholder="Leave empty for auto-generated codes"></textarea>
+      <div style="height: 14px;"></div>
+      <button class="primary" id="mint-btn">Mint Batch</button>
+    </div>
+
+    <!-- List -->
+    <div class="card">
+      <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 8px;">
+        <h2 style="margin: 0;">All Manual QRs</h2>
+        <a id="export-btn" href="#" style="font-weight: 700; font-size: 13px;">↓ Export CSV</a>
+      </div>
+      <div class="filters">
+        <input type="text" id="search" placeholder="Search by referral code or digits..." class="grow" />
+        <button class="chip-btn active" data-filter="">All</button>
+        <button class="chip-btn" data-filter="true">Awaiting</button>
+        <button class="chip-btn" data-filter="false">Activated</button>
+      </div>
+      <div id="table-container" style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Digits</th>
+              <th>Referral Code</th>
+              <th>Status</th>
+              <th>Activated By</th>
+              <th>Vehicle</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="7" class="muted" style="text-align:center; padding: 24px;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex; justify-content: space-between; margin-top: 12px;">
+        <span class="muted" id="pager-info">—</span>
+        <div>
+          <button class="ghost" id="prev-btn">← Prev</button>
+          <button class="ghost" id="next-btn">Next →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mint result modal -->
+<div class="modal-bg" id="mint-modal">
+  <div class="modal">
+    <h3>Batch Minted</h3>
+    <p class="muted">Copy or share this list with your sticker printer. Each row is one physical sticker.</p>
+    <textarea id="mint-result" rows="10" style="font-family: monospace; font-size: 11.5px;" readonly></textarea>
+    <div style="height: 12px; display: flex; gap: 8px; margin-top: 12px;">
+      <button class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('mint-result').value); this.textContent='Copied ✓';">Copy to Clipboard</button>
+      <button class="primary" onclick="document.getElementById('mint-modal').classList.remove('open'); load();" style="flex:1;">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const KEY_STORAGE = 'admin_api_key';
+  let adminKey = localStorage.getItem(KEY_STORAGE) || '';
+  let state = { filter: '', search: '', limit: 50, offset: 0, total: 0 };
+
+  const $ = (id) => document.getElementById(id);
+
+  function showApp() {
+    $('login-screen').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    loadStats();
+    load();
+  }
+  function showLogin() {
+    $('login-screen').classList.remove('hidden');
+    $('app').classList.add('hidden');
+  }
+
+  async function api(path, opts = {}) {
+    const headers = { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey };
+    Object.assign(headers, opts.headers || {});
+    const res = await fetch(path, { ...opts, headers });
+    if (res.status === 401) {
+      localStorage.removeItem(KEY_STORAGE);
+      adminKey = '';
+      showLogin();
+      throw new Error('Invalid admin key');
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  // ─── Login ──────────────────────────────────────────────────────
+  $('login-btn').onclick = async () => {
+    const k = $('login-key').value.trim();
+    if (!k) return;
+    $('login-err').classList.add('hidden');
+    adminKey = k;
+    try {
+      await api('/api/admin/stats');
+      localStorage.setItem(KEY_STORAGE, k);
+      showApp();
+    } catch (e) {
+      adminKey = '';
+      $('login-err').textContent = e.message;
+      $('login-err').classList.remove('hidden');
+    }
+  };
+  $('login-key').addEventListener('keypress', (e) => { if (e.key === 'Enter') $('login-btn').click(); });
+
+  $('logout-btn').onclick = () => {
+    localStorage.removeItem(KEY_STORAGE);
+    adminKey = '';
+    showLogin();
+  };
+
+  // ─── Stats ──────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const s = await api('/api/admin/stats');
+      $('stat-total').textContent = s.total ?? '—';
+      $('stat-unactivated').textContent = s.unactivated ?? '—';
+      $('stat-activated').textContent = s.activated ?? '—';
+    } catch (e) { console.error(e); }
+  }
+
+  // ─── Mint ───────────────────────────────────────────────────────
+  $('mint-btn').onclick = async () => {
+    const count = parseInt($('mint-count').value);
+    const prefix = $('mint-prefix').value.trim();
+    const customRaw = $('mint-custom').value.trim();
+    $('mint-err').classList.add('hidden');
+    $('mint-success').classList.add('hidden');
+    if (!count || count < 1) {
+      $('mint-err').textContent = 'Enter a valid count (1-500)';
+      $('mint-err').classList.remove('hidden');
+      return;
+    }
+    const body = { count };
+    if (prefix) body.prefix = prefix;
+    if (customRaw) {
+      const codes = customRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (codes.length !== count) {
+        $('mint-err').textContent = `Custom codes count (${codes.length}) must equal Count (${count})`;
+        $('mint-err').classList.remove('hidden');
+        return;
+      }
+      body.customCodes = codes;
+    }
+
+    $('mint-btn').disabled = true;
+    $('mint-btn').textContent = 'Minting…';
+    try {
+      const res = await api('/api/admin/manual-qr/mint', {
+        method: 'POST', body: JSON.stringify(body)
+      });
+      const lines = ['digits,referral_code,unique_id,alert_url'];
+      for (const it of res.items) {
+        lines.push([it.digits, it.referral_code, it.qr_unique_id, it.alert_url].join(','));
+      }
+      $('mint-result').value = lines.join('\n');
+      $('mint-modal').classList.add('open');
+      $('mint-count').value = 10;
+      $('mint-prefix').value = '';
+      $('mint-custom').value = '';
+      loadStats();
+    } catch (e) {
+      $('mint-err').textContent = e.message;
+      $('mint-err').classList.remove('hidden');
+    } finally {
+      $('mint-btn').disabled = false;
+      $('mint-btn').textContent = 'Mint Batch';
+    }
+  };
+
+  // ─── List + filters ─────────────────────────────────────────────
+  document.querySelectorAll('.chip-btn[data-filter]').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.chip-btn[data-filter]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.filter = btn.dataset.filter;
+      state.offset = 0;
+      load();
+    };
+  });
+  let searchTimeout;
+  $('search').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      state.search = e.target.value.trim();
+      state.offset = 0;
+      load();
+    }, 250);
+  });
+  $('prev-btn').onclick = () => { if (state.offset > 0) { state.offset = Math.max(0, state.offset - state.limit); load(); } };
+  $('next-btn').onclick = () => { if (state.offset + state.limit < state.total) { state.offset += state.limit; load(); } };
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleString('en-IN', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function load() {
+    const params = new URLSearchParams();
+    if (state.filter) params.set('active', state.filter);
+    if (state.search) params.set('search', state.search);
+    params.set('limit', state.limit);
+    params.set('offset', state.offset);
+    try {
+      const data = await api('/api/admin/manual-qr?' + params);
+      state.total = data.total || 0;
+      const tbody = $('tbody');
+      if (!data.items.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center; padding: 24px;">No manual QRs match the filter.</td></tr>';
+      } else {
+        tbody.innerHTML = data.items.map(row => {
+          const status = row.is_active
+            ? '<span class="pill active">AWAITING</span>'
+            : (row.activated_by_mobile
+                ? '<span class="pill done">ACTIVATED</span>'
+                : '<span class="pill dead">DEACTIVATED</span>');
+          const activatedBy = row.activated_by_mobile
+            ? `${row.owner_name || ''} <span class="muted">(${row.activated_by_mobile})</span>`
+            : '<span class="muted">—</span>';
+          const vehicle = row.vehicle_number || '<span class="muted">—</span>';
+          const btn = row.is_active
+            ? `<button class="danger" onclick="deactivate(${row.id})">Deactivate</button>`
+            : '';
+          return `<tr>
+            <td><span class="code">${row.digits}</span></td>
+            <td><span class="code">${row.referral_code}</span></td>
+            <td>${status}</td>
+            <td>${activatedBy}</td>
+            <td>${vehicle}</td>
+            <td class="muted">${fmtDate(row.created_at)}</td>
+            <td>${btn}</td>
+          </tr>`;
+        }).join('');
+      }
+      const from = state.total === 0 ? 0 : state.offset + 1;
+      const to = Math.min(state.offset + state.limit, state.total);
+      $('pager-info').textContent = `${from}–${to} of ${state.total}`;
+      $('prev-btn').disabled = state.offset === 0;
+      $('next-btn').disabled = state.offset + state.limit >= state.total;
+    } catch (e) {
+      $('tbody').innerHTML = `<tr><td colspan="7" class="err" style="text-align:center; padding: 24px;">${e.message}</td></tr>`;
+    }
+  }
+
+  async function deactivate(id) {
+    if (!confirm('Deactivate this manual QR? It can no longer be redeemed.')) return;
+    try {
+      await api(`/api/admin/manual-qr/${id}/deactivate`, { method: 'POST' });
+      load();
+      loadStats();
+    } catch (e) { alert(e.message); }
+  }
+  window.deactivate = deactivate;
+
+  // Export CSV — auth via ?key= query so browser can just follow the link
+  $('export-btn').onclick = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin/manual-qr/export.csv', {
+        headers: { 'X-Admin-Key': adminKey }
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'manual-qrs.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Export failed: ' + e.message); }
+  };
+
+  // Boot
+  if (adminKey) showApp(); else showLogin();
+</script>
+</body>
+</html>

@@ -199,8 +199,15 @@
   </div>
 
   <div class="card hidden" id="step-success">
-    <h1>Success</h1>
-    <p class="sub">QR has been activated successfully! Redirecting you to login...</p>
+    <h1>QR linked</h1>
+    <p class="sub" id="success-message">Your QR is now active. Details below.</p>
+    <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 14px; margin: 12px 0;">
+      <div style="font-size: 0.7rem; color: #94A3B8; letter-spacing: 1.4px; font-weight: 800;">EXTENSION NUMBER</div>
+      <div id="success-digits" style="font-size: 2rem; color: #FFFFFF; font-weight: 900; letter-spacing: 6px; margin-top: 4px;">—</div>
+    </div>
+    <p class="sub" style="font-size: 0.85rem; color: #94A3B8;">
+      Please open the QR 4 Emergency app on your phone and sign in with the mobile number you just entered to see your QR, edit contacts, and manage settings.
+    </p>
   </div>
 
   <script>
@@ -382,21 +389,10 @@
           return;
         }
 
-        // Fire-and-forget legacy scan log (call_logs table).
-        try {
-          var logBody = { uniqueId: UNIQUE_ID, target: target, caller: "0000000000" };
-          if (target === "family") logBody.family_detail_id = parseInt(familyId, 10);
-          fetch(base + "/alert/create-call", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(logBody),
-            keepalive: true,
-          }).catch(function () { /* ignore */ });
-        } catch (_) { /* ignore */ }
-
         // Once we have the location (or a null timeout), log the tap +
         // location as an alert_events row. Fire-and-forget so it never
-        // blocks the dialer.
+        // blocks the dialer. This replaces the retired /alert/create-call
+        // endpoint — same audit trail purpose, plus geolocation.
         locationPromise.then(function (loc) {
           var eventBody = { contact_kind: target };
           if (target === "family") eventBody.contact_family_id = parseInt(familyId, 10);
@@ -535,12 +531,15 @@
           btn.disabled = false;
           return;
         }
+
+        // Stay on this page and render the success step with the digits
+        // and the message the server returned. No redirect — the bystander
+        // is on a stranger's browser and shouldn't be dumped into a login.
+        var digitsEl = document.getElementById('success-digits');
+        var msgEl    = document.getElementById('success-message');
+        if (digitsEl && data.digits) digitsEl.textContent = data.digits;
+        if (msgEl && data.message)   msgEl.textContent    = data.message;
         showStep('success');
-        
-        // Redirect to login screen after successful activation (after 3 seconds)
-        setTimeout(() => {
-          window.location.href = window.location.origin;
-        }, 3000);
       } catch (e) {
         showModal("Network error");
         btn.disabled = false;
