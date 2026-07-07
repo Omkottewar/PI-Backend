@@ -58,15 +58,15 @@ router.post(
       });
     }
     if (customCodes) {
-      const seen = new Set();
+      // Referral codes may be reused across batches AND within a single
+      // batch — the DB has no UNIQUE constraint on referral_code and the
+      // activation flow keys by (unique_id, referral_code) where
+      // unique_id (UUID) is per-sticker. So a whole shipment can share
+      // one code as a "campaign token" if the admin wants.
       for (const c of customCodes) {
         if (!c || typeof c !== 'string') {
           return res.status(400).json({ error: 'customCodes must be non-empty strings' });
         }
-        if (seen.has(c)) {
-          return res.status(400).json({ error: `Duplicate referral code in batch: ${c}` });
-        }
-        seen.add(c);
       }
     }
 
@@ -105,9 +105,14 @@ router.post(
       await client.query('ROLLBACK');
       console.error('[admin/mint] error:', err);
       if (err.code === '23505') {
-        return res
-          .status(409)
-          .json({ error: 'A referral code in the batch is already taken. Try again.' });
+        // Unique constraints on manual_qr: qr_unique_id (UUID collision —
+        // vanishingly rare) and digits (sequence collision — should never
+        // happen). Never fires for referral_code (no UNIQUE constraint
+        // there, by design).
+        return res.status(409).json({
+          error:
+            'Rare UUID or digits sequence collision. Retry the mint — a new UUID will be generated.',
+        });
       }
       return res.status(500).json({ error: err.message });
     } finally {
