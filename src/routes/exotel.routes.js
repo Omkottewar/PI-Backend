@@ -108,33 +108,46 @@ router.get('/lookup', async (req, res) => {
     const row = result.rows[0];
     const family = Array.isArray(row.family_contacts) ? row.family_contacts : [];
 
-    // Build the ringing list: selected contact first (so it's the primary
-    // target for tracking / caller_activity attribution), then every
-    // other contact from the QR — owner + all other family — in an order
-    // that puts the most-relevant number first for Exotel's parallel ring.
+    // Build the ringing list: FAMILY CONTACTS ONLY. The owner's mobile
+    // is intentionally excluded — the QR owner is often the person in
+    // the emergency (the driver in the crashed vehicle), so ringing
+    // their phone is pointless. Only their nominated emergency contacts
+    // should be dialed.
+    //
+    // Order matters for parallel ringing UX:
+    //   - If the bystander explicitly tapped a family member on the
+    //     alert page, that contact is dialed first.
+    //   - The remaining family contacts follow in id order.
     const numbers = [];
     const push = (raw) => {
       const e = normalizeIndianMobile(raw);
       if (e && !numbers.includes(e)) numbers.push(e);
     };
 
-    // The single "primary target" we stamp onto caller_activity + the
-    // pending call_logs row. Defaults to owner if nothing is selected or
-    // the selected family row is gone.
-    let primaryTargetRaw = row.owner_mobile;
+    // primaryTargetRaw = the number we stamp onto caller_activity and
+    // the pending call_logs row. Represents "who the caller was trying
+    // to reach" for owner-side attribution.
+    let primaryTargetRaw;
     if (row.selected_contact_kind === 'family' && row.selected_family_id != null) {
       const selected = family.find((f) => f.id === row.selected_family_id);
-      if (selected && selected.phone) primaryTargetRaw = selected.phone;
-      // Selected first, then all other family, then owner.
-      push(primaryTargetRaw);
+      if (selected && selected.phone) {
+        primaryTargetRaw = selected.phone;
+        push(primaryTargetRaw);
+      }
+      // Then the remaining family contacts (skip the one we already added).
       for (const f of family) {
         if (f.id !== row.selected_family_id) push(f.phone);
       }
-      push(row.owner_mobile);
     } else {
-      // Owner selected (or no selection). Owner first, then all family.
-      push(row.owner_mobile);
+      // Owner selected or no selection — just ring the full family list
+      // in id order. The owner's own mobile is NOT included.
       for (const f of family) push(f.phone);
+    }
+    // Fall back to the first family contact if no primary target was set
+    // (e.g., owner selected — we don't dial the owner but we still need
+    // something on caller_activity.to_number).
+    if (!primaryTargetRaw && family.length > 0) {
+      primaryTargetRaw = family[0].phone;
     }
     const toE164 = normalizeIndianMobile(primaryTargetRaw);
 
