@@ -12,6 +12,21 @@
 -- so the sticker can be printed at manufacturing time.
 
 -- 1. Add pre-allocated digits to manual_qr.
+-- If an earlier manual patch created the column under a different name
+-- (`extension_number`), rename it in place instead of adding a second one.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'manual_qr' AND column_name = 'extension_number'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'manual_qr' AND column_name = 'digits'
+  ) THEN
+    ALTER TABLE manual_qr RENAME COLUMN extension_number TO digits;
+  END IF;
+END $$;
+
 ALTER TABLE manual_qr
   ADD COLUMN IF NOT EXISTS digits VARCHAR(10);
 

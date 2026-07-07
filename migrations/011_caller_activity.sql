@@ -18,7 +18,30 @@ CREATE INDEX IF NOT EXISTS idx_caller_activity_qr
   ON caller_activity(qr_id);
 
 -- Partial index so listing blocked callers per QR is cheap (used by the
--- Exotel lookup fast-path).
-CREATE INDEX IF NOT EXISTS idx_caller_activity_blocked
-  ON caller_activity(qr_id, caller_number)
-  WHERE is_blocked = true;
+-- Exotel lookup fast-path). The caller column was renamed from
+-- `caller_number` to `from_number` in migration 013 — this DO block
+-- picks whichever name is present so the migration is idempotent across
+-- both fresh installs (caller_number) and re-runs after 013 has applied
+-- (from_number). PostgreSQL preserves the index automatically when the
+-- underlying column is renamed, so this only ever creates it once.
+DO $$
+DECLARE
+  col_name TEXT;
+BEGIN
+  SELECT column_name INTO col_name
+    FROM information_schema.columns
+   WHERE table_name = 'caller_activity'
+     AND column_name IN ('caller_number', 'from_number')
+   LIMIT 1;
+
+  IF col_name IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+     WHERE schemaname = 'public'
+       AND indexname = 'idx_caller_activity_blocked'
+  ) THEN
+    EXECUTE format(
+      'CREATE INDEX idx_caller_activity_blocked ON caller_activity(qr_id, %I) WHERE is_blocked = true',
+      col_name
+    );
+  END IF;
+END $$;

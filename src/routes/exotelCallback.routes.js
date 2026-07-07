@@ -261,10 +261,25 @@ router.get('/call-completion', async (req, res) => {
   }
 });
 
+// Parse an incoming timestamp from Exotel. Returns null for anything that
+// isn't a real call time — including Unix epoch 0 (which shows up as
+// 1970-01-01 in Postgres) when Exotel forwards a missing/zero value.
 function parseTs(v) {
   if (v == null || v === '') return null;
-  const d = new Date(v);
+  // Numeric strings → Unix seconds/ms.
+  const numMatch = typeof v === 'string' && /^\d+$/.test(v);
+  let d;
+  if (typeof v === 'number' || numMatch) {
+    const n = Number(v);
+    // Values less than 1e12 are seconds, otherwise milliseconds.
+    d = new Date(n < 1e12 ? n * 1000 : n);
+  } else {
+    d = new Date(v);
+  }
   if (Number.isNaN(d.getTime())) return null;
+  // Anything older than 2020 is a call-log timestamp bug — reject it so
+  // NULL lands in the DB instead of 1970-01-01.
+  if (d.getUTCFullYear() < 2020) return null;
   return d.toISOString();
 }
 
