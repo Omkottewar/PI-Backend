@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { requireAuth } from '../middleware/auth.js';
+import { pool } from '../db/pool.js';
 import {
   createQrRecord,
   listHistoryForUser,
@@ -111,6 +112,44 @@ router.put(
     } catch (e) {
       const code = e.statusCode || 500;
       return res.status(code).json({ error: e.message });
+    }
+  }
+);
+
+// Owner phone — updates only qrdata.mobile for the QR. Kept separate from
+// users.mobile (the login identifier), which we never change here because
+// that would break the account's OTP login path. If a user wants to
+// update the QR-owner phone (the one that gets called when the bystander
+// taps "Call Owner"), this is the endpoint.
+router.put(
+  '/:id/owner-phone',
+  requireAuth,
+  body('mobile').trim().notEmpty().isLength({ min: 10, max: 15 }),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const qrId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(qrId)) {
+      return res.status(400).json({ error: 'Invalid QR id' });
+    }
+    try {
+      const check = await pool.query(
+        `SELECT id FROM qrdata WHERE id = $1 AND user_id = $2`,
+        [qrId, req.userId]
+      );
+      if (!check.rows.length) return res.status(404).json({ error: 'QR not found' });
+
+      const mobile = String(req.body.mobile).trim();
+      const r = await pool.query(
+        `UPDATE qrdata SET mobile = $1 WHERE id = $2
+         RETURNING id, mobile`,
+        [mobile, qrId]
+      );
+      return res.json({ ok: true, mobile: r.rows[0].mobile });
+    } catch (err) {
+      console.error('[qr/owner-phone] error:', err);
+      return res.status(500).json({ error: err.message });
     }
   }
 );

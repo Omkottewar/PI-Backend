@@ -12,13 +12,19 @@ const MAX_RINGING_DURATION_SEC = 45;
 const MAX_CONVERSATION_DURATION_SEC = 120;
 const RECORD_CALLS = true;
 
+// Exotel's Connect applet caps parallel ringing at 5 numbers per call.
+const MAX_PARALLEL_ATTEMPTS = 5;
+
 // Build the JSON payload the Exotel Connect (Fetch destination from URL)
-// applet expects. `numbers` = [] means "no target — hang up", which is what
-// we return for a blocked caller.
+// applet expects. `numbers` = [] means "no target — hang up", which is
+// what we return for a blocked caller. When multiple numbers are given,
+// parallel_ringing is turned on so Exotel rings them all at once and
+// bridges to whoever picks up first.
 function exotelResponse(numbers) {
+  const list = Array.isArray(numbers) ? numbers.slice(0, MAX_PARALLEL_ATTEMPTS) : [];
   return {
     fetch_after_attempt: false,
-    destination: { numbers },
+    destination: { numbers: list },
     outgoing_phone_number: BRIDGE_NUMBER,
     record: RECORD_CALLS,
     recording_channels: 'dual',
@@ -33,8 +39,8 @@ function exotelResponse(numbers) {
         'Please stay on the line.',
     },
     parallel_ringing: {
-      activate: false,
-      max_parallel_attempts: 1,
+      activate: list.length > 1,
+      max_parallel_attempts: Math.max(list.length, 1),
     },
   };
 }
@@ -75,6 +81,8 @@ router.get('/lookup', async (req, res) => {
   }
 
   try {
+    // One JOIN: pull the QR row plus every family_details phone in a
+    // single JSON aggregate so we can build a parallel-ringing list.
     const result = await pool.query(
       `SELECT
          q.id,
@@ -82,9 +90,13 @@ router.get('/lookup', async (req, res) => {
          q.selected_contact_kind,
          q.selected_family_id,
          q.selected_at,
-         f.phone               AS family_phone
+         COALESCE(
+           (SELECT json_agg(json_build_object('id', f.id, 'phone', f.phone)
+                            ORDER BY f.id)
+              FROM family_details f WHERE f.qr_id = q.id),
+           '[]'::json
+         ) AS family_contacts
        FROM qrdata q
-       LEFT JOIN family_details f ON f.id = q.selected_family_id
        WHERE q.digits = $1 AND q.is_active = true`,
       [digits]
     );
@@ -94,17 +106,37 @@ router.get('/lookup', async (req, res) => {
     }
 
     const row = result.rows[0];
+    const family = Array.isArray(row.family_contacts) ? row.family_contacts : [];
 
-    // Resolve the intended target so we can stamp it onto caller_activity
-    // even before the block/TTL checks. Falls back to owner if the
-    // selected family row was deleted.
-    let targetRaw;
-    if (row.selected_contact_kind === 'family' && row.family_phone) {
-      targetRaw = row.family_phone;
+    // Build the ringing list: selected contact first (so it's the primary
+    // target for tracking / caller_activity attribution), then every
+    // other contact from the QR — owner + all other family — in an order
+    // that puts the most-relevant number first for Exotel's parallel ring.
+    const numbers = [];
+    const push = (raw) => {
+      const e = normalizeIndianMobile(raw);
+      if (e && !numbers.includes(e)) numbers.push(e);
+    };
+
+    // The single "primary target" we stamp onto caller_activity + the
+    // pending call_logs row. Defaults to owner if nothing is selected or
+    // the selected family row is gone.
+    let primaryTargetRaw = row.owner_mobile;
+    if (row.selected_contact_kind === 'family' && row.selected_family_id != null) {
+      const selected = family.find((f) => f.id === row.selected_family_id);
+      if (selected && selected.phone) primaryTargetRaw = selected.phone;
+      // Selected first, then all other family, then owner.
+      push(primaryTargetRaw);
+      for (const f of family) {
+        if (f.id !== row.selected_family_id) push(f.phone);
+      }
+      push(row.owner_mobile);
     } else {
-      targetRaw = row.owner_mobile;
+      // Owner selected (or no selection). Owner first, then all family.
+      push(row.owner_mobile);
+      for (const f of family) push(f.phone);
     }
-    const toE164 = normalizeIndianMobile(targetRaw);
+    const toE164 = normalizeIndianMobile(primaryTargetRaw);
 
     // UPSERT caller_activity keyed by (qr_id, from_number).
     // to_number and last_call_sid are updated on every hit so the owner
@@ -156,14 +188,16 @@ router.get('/lookup', async (req, res) => {
       return res.status(404).json({ error: 'selection expired' });
     }
 
-    if (!toE164) {
-      return res.status(404).json({ error: 'target number malformed' });
+    if (!toE164 || numbers.length === 0) {
+      return res.status(404).json({ error: 'no target numbers' });
     }
 
     // Insert a "pending" call_logs row keyed by call_sid. The completion
     // webhook UPDATEs this same row by call_sid, giving us race-free
     // attribution even when a caller dials multiple contacts rapidly.
     // ON CONFLICT DO NOTHING handles Exotel Passthru retries idempotently.
+    // The `to_number` we stamp is the PRIMARY target (selected or owner) —
+    // the same number that appears first in the parallel-ring list.
     if (callSid) {
       try {
         await pool.query(
@@ -179,7 +213,8 @@ router.get('/lookup', async (req, res) => {
       }
     }
 
-    return res.json(exotelResponse([toE164]));
+    console.log('[exotel/lookup] returning numbers', numbers);
+    return res.json(exotelResponse(numbers));
   } catch (err) {
     console.error('[exotel/lookup] error:', err);
     return res.status(500).json({ error: err.message });
