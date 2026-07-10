@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { normalizeIndianMobile } from '../utils/phone.js';
+import { notifyUser } from '../services/push.service.js';
+import { maskMobile } from '../utils/mask.js';
 
 const router = Router();
 
@@ -86,6 +88,8 @@ router.get('/lookup', async (req, res) => {
     const result = await pool.query(
       `SELECT
          q.id,
+         q.user_id,
+         q.vehicle_number,
          q.mobile              AS owner_mobile,
          q.selected_contact_kind,
          q.selected_family_id,
@@ -183,6 +187,25 @@ router.get('/lookup', async (req, res) => {
         // Tracking must never break the primary routing path.
         console.error('[caller-activity] upsert failed:', err);
       }
+    }
+
+    // Fire-and-forget push: "an incoming call is being bridged". We ring
+    // the family contacts, not the owner, but the owner still wants to
+    // know a call is happening right now (so they can call back later if
+    // the family missed it). Skip on blocked callers — the owner already
+    // opted out of hearing from that number.
+    if (row.user_id && fromNumber && !isBlocked) {
+      const vehicle = row.vehicle_number ? ` (${row.vehicle_number})` : '';
+      notifyUser(row.user_id, {
+        title: 'Incoming call on your QR',
+        message: `${maskMobile(fromNumber)} is calling your emergency contacts${vehicle}.`,
+        type: 'qr_call_incoming',
+        data: {
+          qr_id: row.id,
+          from_number: fromNumber,
+          call_sid: callSid || null,
+        },
+      }).catch((e) => console.error('[exotel/lookup] notifyUser rejected:', e));
     }
 
     // Blocked: hand Exotel an empty numbers list so its Connect applet

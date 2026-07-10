@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { pool } from '../db/pool.js';
 import { config } from '../config/index.js';
 import { verifyPaymentSignature } from './razorpay.service.js';
+import { sendInvoiceEmail } from './mail.service.js';
 
 const RELATIONS = new Set(['Father', 'Mother', 'Sister', 'Brother', 'Other']);
 
@@ -23,6 +24,7 @@ export async function createQrRecord({
   family,
   isManual = false,
   preAllocatedDigits = null,          // used by manual-activate path
+  referral_code = null,                // used by manual-activate path
   shipping_address_line1 = null,
   shipping_address_line2 = null,
   shipping_city = null,
@@ -93,15 +95,16 @@ export async function createQrRecord({
     const qrRes = await client.query(
       `INSERT INTO qrdata (
          user_id, unique_id, name, mobile, email,
-         vehicle_number, blood_group, digits, is_manual,
+         vehicle_number, blood_group, digits, is_manual, referral_code,
          shipping_address_line1, shipping_address_line2,
          shipping_city, shipping_state, shipping_pincode, shipping_country
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING *`,
       [
         userId, uniqueId, name.trim(), mobile.trim(), email.trim(),
         vehicleNorm, blood_group || null, digits, isManual,
+        referral_code ? String(referral_code).trim() : null,
         shipping_address_line1 ? String(shipping_address_line1).trim() : null,
         shipping_address_line2 ? String(shipping_address_line2).trim() : null,
         shipping_city ? String(shipping_city).trim() : null,
@@ -133,6 +136,15 @@ export async function createQrRecord({
     }
     await client.query('COMMIT');
     const alertUrl = `${config.publicAppUrl}/alert/${uniqueId}?digits=${qr.digits}`;
+
+    // Fire-and-forget invoice email. Errors are swallowed inside the
+    // service so a flaky SMTP never masks a successful activation. We
+    // don't await it — the caller sees the response the moment the DB
+    // row is committed.
+    sendInvoiceEmail(qr, family).catch((e) =>
+      console.error('[qr/service] sendInvoiceEmail rejected unexpectedly:', e)
+    );
+
     return { ...qr, alertUrl };
   } catch (e) {
     await client.query('ROLLBACK');

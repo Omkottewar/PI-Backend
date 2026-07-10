@@ -162,8 +162,8 @@
       <h2>Manual QR Overview</h2>
       <div class="stats" id="stats-grid">
         <div class="stat total"><div class="label">Total Minted</div><div class="value" id="stat-total">—</div></div>
-        <div class="stat unactivated"><div class="label">Awaiting Activation</div><div class="value" id="stat-unactivated">—</div></div>
-        <div class="stat activated"><div class="label">Activated</div><div class="value" id="stat-activated">—</div></div>
+        <div class="stat unactivated"><div class="label">Awaiting</div><div class="value" id="stat-awaiting">—</div></div>
+        <div class="stat activated"><div class="label">Used</div><div class="value" id="stat-used">—</div></div>
       </div>
     </div>
 
@@ -224,8 +224,9 @@
       <div class="filters">
         <input type="text" id="search" placeholder="Search by referral code or digits..." class="grow" />
         <button class="chip-btn active" data-filter="">All</button>
-        <button class="chip-btn" data-filter="true">Awaiting</button>
-        <button class="chip-btn" data-filter="false">Activated</button>
+        <button class="chip-btn" data-filter="awaiting">Awaiting</button>
+        <button class="chip-btn" data-filter="used">Used</button>
+        <button class="chip-btn" data-filter="deactivated">Deactivated</button>
       </div>
       <div id="table-container" style="overflow-x: auto;">
         <table>
@@ -331,8 +332,8 @@
     try {
       const s = await api('/api/admin/stats');
       $('stat-total').textContent = s.total ?? '—';
-      $('stat-unactivated').textContent = s.unactivated ?? '—';
-      $('stat-activated').textContent = s.activated ?? '—';
+      $('stat-awaiting').textContent = s.awaiting ?? '—';
+      $('stat-used').textContent = s.used ?? '—';
     } catch (e) { console.error(e); }
   }
 
@@ -441,7 +442,7 @@
 
   async function load() {
     const params = new URLSearchParams();
-    if (state.filter) params.set('active', state.filter);
+    if (state.filter) params.set('filter', state.filter);
     if (state.search) params.set('search', state.search);
     params.set('limit', state.limit);
     params.set('offset', state.offset);
@@ -453,10 +454,10 @@
         tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center; padding: 24px;">No manual QRs match the filter.</td></tr>';
       } else {
         tbody.innerHTML = data.items.map(row => {
-          const status = row.is_active
-            ? '<span class="pill active">AWAITING</span>'
-            : (row.activated_by_mobile
-                ? '<span class="pill done">ACTIVATED</span>'
+          const status = row.used
+            ? '<span class="pill done">USED</span>'
+            : (row.is_active
+                ? '<span class="pill active">AWAITING</span>'
                 : '<span class="pill dead">DEACTIVATED</span>');
           const activatedBy = row.activated_by_mobile
             ? `${row.owner_name || ''} <span class="muted">(${row.activated_by_mobile})</span>`

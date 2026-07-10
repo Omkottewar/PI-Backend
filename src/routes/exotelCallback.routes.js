@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { normalizeIndianMobile } from '../utils/phone.js';
+import { notifyUser } from '../services/push.service.js';
+import { maskMobile } from '../utils/mask.js';
 
 const router = Router();
 
@@ -252,6 +254,48 @@ router.get('/call-completion', async (req, res) => {
           `from=${fromNumber} to=${toNumber} sid=${callSid}. ` +
           'call_logs row exists but qr_id is NULL.'
       );
+    }
+
+    // Fire-and-forget push: "the call is over, here's the outcome". Only
+    // fires when we could attribute the call to a QR owner. Body varies
+    // by outcome so the notification is worth reading at a glance:
+    //   • answered → "1m 24s call with 98****3210"
+    //   • missed   → "Missed call from 98****3210"
+    if (qrId) {
+      try {
+        const ownerRes = await pool.query(
+          `SELECT q.user_id, q.vehicle_number
+             FROM qrdata q WHERE q.id = $1`,
+          [qrId]
+        );
+        const userId = ownerRes.rows[0]?.user_id;
+        const vehicle = ownerRes.rows[0]?.vehicle_number || '';
+        if (userId) {
+          const answered = (durationSec ?? 0) > 0;
+          const masked = fromNumber ? maskMobile(fromNumber) : 'Unknown';
+          const durText = answered
+            ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`
+            : '';
+          const vLabel = vehicle ? ` (${vehicle})` : '';
+          notifyUser(userId, {
+            title: answered ? 'Call completed' : 'Missed call on your QR',
+            message: answered
+              ? `${durText} call with ${masked}${vLabel}.`
+              : `${masked} tried to reach your emergency contacts${vLabel}.`,
+            type: answered ? 'qr_call_completed' : 'qr_call_missed',
+            data: {
+              qr_id: qrId,
+              call_log_id: callLogId,
+              from_number: fromNumber,
+              duration: durationSec,
+            },
+          }).catch((e) =>
+            console.error('[callback] notifyUser rejected:', e)
+          );
+        }
+      } catch (err) {
+        console.error('[callback] owner lookup failed:', err.message);
+      }
     }
 
     return res.json({ ok: true, call_log_id: callLogId });

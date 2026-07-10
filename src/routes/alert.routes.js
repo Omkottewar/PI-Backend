@@ -8,6 +8,7 @@ import {
   getQrByUniqueId,
   createQrRecord,
 } from '../services/qr.service.js';
+import { notifyUser } from '../services/push.service.js';
 import { v4 as uuidv4 } from 'uuid';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -181,6 +182,27 @@ router.post(
         ]
       );
 
+      // Fire-and-forget push to the QR owner: "your QR was just scanned".
+      // Runs after res.json so a slow FCM call can't stretch the response.
+      if (qr.user_id) {
+        const hasLocation =
+          latitude != null && longitude != null &&
+          !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude));
+        const vehicle = qr.vehicle_number ? ` (${qr.vehicle_number})` : '';
+        notifyUser(qr.user_id, {
+          title: 'Your QR was scanned',
+          message: `Someone just opened your QR page${vehicle}.` +
+            (hasLocation ? ' Tap to see where.' : ''),
+          type: 'qr_scanned',
+          data: {
+            qr_id: qr.id,
+            unique_id: qr.unique_id,
+            latitude: hasLocation ? Number(latitude) : null,
+            longitude: hasLocation ? Number(longitude) : null,
+          },
+        }).catch((e) => console.error('[alert/event] notifyUser rejected:', e));
+      }
+
       return res.json({ ok: true });
     } catch (err) {
       console.error('[alert/:uniqueId/event] error:', err);
@@ -274,9 +296,14 @@ router.post('/:uniqueId/manual_activate',
         family,
         isManual: true,
         preAllocatedDigits: manualQr.digits || null,
+        referral_code: manualQr.referral_code || referralCode,
       });
-      // Deactivate manual QR
-      await pool.query(`UPDATE manual_qr SET is_active = false WHERE id = $1`, [manualQr.id]);
+      // Mark the sticker as redeemed. `used = true` distinguishes
+      // "customer activated" from "admin deactivated" (is_active=false).
+      await pool.query(
+        `UPDATE manual_qr SET is_active = false, used = true WHERE id = $1`,
+        [manualQr.id]
+      );
       return res.json({
         success: true,
         unique_id: uniqueId,

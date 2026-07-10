@@ -20,8 +20,9 @@ router.get('/stats', requireAdmin, async (req, res) => {
     const r = await pool.query(
       `SELECT
          COUNT(*)::int AS total,
-         COUNT(*) FILTER (WHERE is_active = true)::int AS unactivated,
-         COUNT(*) FILTER (WHERE is_active = false)::int AS activated
+         COUNT(*) FILTER (WHERE is_active = true AND used = false)::int AS awaiting,
+         COUNT(*) FILTER (WHERE used = true)::int AS used,
+         COUNT(*) FILTER (WHERE is_active = false AND used = false)::int AS deactivated
        FROM manual_qr`
     );
     return res.json(r.rows[0]);
@@ -130,15 +131,25 @@ router.post(
 //     ?limit=50 &offset=0
 router.get('/manual-qr', requireAdmin, async (req, res) => {
   try {
-    const active = String(req.query.active || '');
+    // Filter param: `?filter=awaiting | used | deactivated | all`
+    //   awaiting    = is_active AND NOT used  (sticker in the wild, unredeemed)
+    //   used        = used = true             (customer activated)
+    //   deactivated = is_active = false AND NOT used  (admin recall / lost sticker)
+    //   all / empty = no filter
+    const filter = String(req.query.filter || req.query.active || '').trim();
     const search = String(req.query.search || '').trim();
     const limit = Math.min(parseInt(req.query.limit) || 50, 500);
     const offset = parseInt(req.query.offset) || 0;
 
     const clauses = [];
     const params = [];
-    if (active === 'true') clauses.push(`mq.is_active = true`);
-    else if (active === 'false') clauses.push(`mq.is_active = false`);
+    if (filter === 'awaiting' || filter === 'true') {
+      clauses.push(`mq.is_active = true AND mq.used = false`);
+    } else if (filter === 'used') {
+      clauses.push(`mq.used = true`);
+    } else if (filter === 'deactivated' || filter === 'false') {
+      clauses.push(`mq.is_active = false AND mq.used = false`);
+    }
     if (search) {
       params.push(`%${search}%`);
       clauses.push(
@@ -156,7 +167,7 @@ router.get('/manual-qr', requireAdmin, async (req, res) => {
     params.push(limit, offset);
     const rows = await pool.query(
       `SELECT mq.id, mq.qr_unique_id, mq.referral_code, mq.digits,
-              mq.is_active, mq.created_at,
+              mq.is_active, mq.used, mq.created_at,
               q.vehicle_number, q.name AS owner_name,
               u.mobile AS activated_by_mobile
          FROM manual_qr mq
