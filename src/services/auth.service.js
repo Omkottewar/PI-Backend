@@ -27,6 +27,30 @@ function hashOtp(otp, salt) {
   return createHash('sha256').update(String(salt) + String(otp)).digest('hex');
 }
 
+// Cheap idempotency guard so a fresh deploy that hasn't run migrations
+// yet still works. Migration 019 also creates this schema; keeping it
+// here means we never 500 with "relation login_otp does not exist" while
+// waiting on `npm run migrate` to fire on Render.
+let _loginOtpEnsured = false;
+async function ensureLoginOtpTable(client) {
+  if (_loginOtpEnsured) return;
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS login_otp (
+      id           SERIAL PRIMARY KEY,
+      mobile       VARCHAR(20) NOT NULL,
+      otp_hash     TEXT        NOT NULL,
+      salt         TEXT        NOT NULL,
+      expires_at   TIMESTAMPTZ NOT NULL,
+      attempts     INT         NOT NULL DEFAULT 0,
+      used_at      TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await client.query(`CREATE INDEX IF NOT EXISTS login_otp_mobile_idx ON login_otp(mobile);`);
+  await client.query(`CREATE INDEX IF NOT EXISTS login_otp_expires_idx ON login_otp(expires_at);`);
+  _loginOtpEnsured = true;
+}
+
 // Generates a 4-digit OTP, invalidates any prior codes for this mobile,
 // and persists a fresh salted-hash row with a 5-minute TTL. Returns the
 // PLAIN-TEXT OTP so the caller can pipe it to the SMS transport — never
@@ -34,6 +58,7 @@ function hashOtp(otp, salt) {
 export async function issueLoginOtp(mobile) {
   const client = await pool.connect();
   try {
+    await ensureLoginOtpTable(client);
     await client.query('BEGIN');
     // Any outstanding unused OTPs for this mobile are marked as consumed
     // so only the newest code can be redeemed. Prevents a stale code
