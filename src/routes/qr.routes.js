@@ -33,7 +33,8 @@ router.post(
   body('razorpay_signature').notEmpty(),
   body('name').trim().notEmpty(),
   body('mobile').trim().isLength({ min: 10, max: 15 }),
-  body('email').isEmail().normalizeEmail(),
+  // gmail_remove_dots: false — see profile.routes.js for the reason.
+  body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
   body('vehicle_number').trim().notEmpty().matches(/^([A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2})$/).withMessage('Invalid Vehicle Number'),
   body('blood_group').optional().isString().trim(),
   body('family').isArray({ min: 1, max: 5 }),

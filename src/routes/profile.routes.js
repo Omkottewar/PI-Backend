@@ -25,7 +25,12 @@ router.put(
   '/',
   requireAuth,
   body('name').optional({ nullable: true }).isString().trim(),
-  body('email').optional({ nullable: true, values: 'falsy' }).isEmail().normalizeEmail(),
+  // gmail_remove_dots: false so "om.kottewar@gmail.com" isn't silently
+  // rewritten to "omkottewar@gmail.com" — Gmail treats them as the same
+  // inbox, but the user typed the version they want on record.
+  body('email').optional({ nullable: true, values: 'falsy' })
+    .isEmail()
+    .normalizeEmail({ gmail_remove_dots: false }),
   body('age').optional({ nullable: true }).isInt({ min: 1, max: 150 }),
   body('address').optional({ nullable: true }).isString().trim(),
   async (req, res) => {
