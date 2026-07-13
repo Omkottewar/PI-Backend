@@ -12,6 +12,13 @@ export const config = {
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
   publicAppUrl: (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
+  // Temporary static OTP accepted alongside real per-mobile OTPs so the
+  // team can log in while an SMS provider is still being picked. When
+  // this is set, every user can log in with either the real OTP that
+  // would have been SMS'd OR this fixed code. Unset it (or set to '')
+  // the moment a live SMS provider goes into SMS_PROVIDER — otherwise
+  // any attacker who guesses this code owns every account.
+  devStaticOtp: (process.env.DEV_STATIC_OTP || '').trim(),
   // SMTP config for transactional email (invoice on QR activation). All
   // values are optional at boot — if any are missing the mail service
   // silently no-ops. Gmail SMTP: host smtp.gmail.com, port 465, secure=true,
@@ -72,5 +79,13 @@ export function assertConfig() {
   // can forge admin tokens.
   if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET is required in production');
+  }
+  // Loud warning if the static-OTP escape hatch is enabled — so we don't
+  // silently ship a "1234 works for everyone" backdoor into production.
+  if (config.devStaticOtp) {
+    console.warn(
+      `[config] WARNING: DEV_STATIC_OTP is set to "${config.devStaticOtp}". ` +
+      `Every user can log in with this code. Unset it once SMS_PROVIDER is live.`
+    );
   }
 }

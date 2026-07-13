@@ -128,43 +128,60 @@ async function getOwnerForQr(qrId) {
 // Copy is hand-tuned to fit 160 chars where possible so nothing splits
 // into two billed segments.
 
+// Scenario 1 — login OTP delivery.
 export async function sendLoginOtp(mobile, otp) {
   const msg = `${BRAND}: Your login code is ${otp}. Do not share this with anyone. Valid for 5 minutes.`;
   return dispatch(mobile, msg);
 }
 
+// Scenario 2 — QR just generated. Copy per product spec:
+//   "your QR is generated with vehicle {V} with Owner number {N}, it will
+//    be delivered to your doorstep in 3-5 days"
 export async function sendQrCreated({ mobile, vehicle_number, owner_number }) {
   const msg =
-    `${BRAND}: Your QR for vehicle ${vehicle_number} (owner ${owner_number}) is generated. ` +
-    `Sticker will be delivered to your address in 3-5 working days.`;
+    `${BRAND}: Your QR is generated with vehicle ${vehicle_number} ` +
+    `and owner number ${owner_number}. It will be delivered to your ` +
+    `doorstep in 3-5 working days.`;
   return dispatch(mobile, msg);
 }
 
+// Scenario 3a — bystander tapped Call Owner on the alert page.
+//   "Somebody scanned vehicle {V} emergency QR, you can check it in the app."
 export async function sendQrScannedOwnerTap(qrId) {
   const owner = await getOwnerForQr(qrId);
   if (!owner || !owner.mobile) return { ok: false, error: 'no_owner_mobile' };
   const msg =
-    `${BRAND}: Someone scanned your vehicle ${owner.vehicle || 'QR'} and ` +
-    `tapped Call Owner. Check the app for details.`;
+    `${BRAND}: Somebody scanned vehicle ${owner.vehicle || 'your QR'} ` +
+    `emergency QR, you can check it in the app.`;
   return dispatch(owner.mobile, msg);
 }
 
+// Scenario 3b — bystander tapped a family contact (father/mother/etc).
+//   "Somebody scanned the vehicle QR {V}, they may need help from you."
 export async function sendQrScannedFamilyTap(qrId) {
   const owner = await getOwnerForQr(qrId);
   if (!owner || !owner.mobile) return { ok: false, error: 'no_owner_mobile' };
   const msg =
-    `${BRAND}: Someone scanned your vehicle ${owner.vehicle || 'QR'} — ` +
-    `they may need help from you. Check the app for details.`;
+    `${BRAND}: Somebody scanned the vehicle QR ${owner.vehicle || ''}` +
+    `, they may need help from you. Check the app for details.`;
   return dispatch(owner.mobile, msg);
 }
 
+// Scenario 4 — daily countdown for the last 7 days before expiry.
+//   "Your QR gets expired in {N} days, please get it active in Rs.{99}
+//    through App {app_link} or directly from browser {web_link}"
+// Price is drawn from config.renewal.amountPaise so campaign pricing
+// flows through without a copy change.
 export async function sendExpiryCountdown({ mobile, vehicle_number, days_left, app_link, web_link }) {
-  const links = [app_link, web_link].filter(Boolean).join(' or ');
-  const linkFrag = links ? ` Renew via ${links}.` : '';
-  const msg =
-    `${BRAND}: Your QR for ${vehicle_number} expires in ${days_left} day` +
-    `${days_left === 1 ? '' : 's'}.${linkFrag}`;
-  return dispatch(mobile, msg);
+  const rupees = Math.round((config.renewal?.amountPaise ?? 9900) / 100);
+  const dayText = `${days_left} day${days_left === 1 ? '' : 's'}`;
+  const parts = [
+    `${BRAND}: Your QR for ${vehicle_number} expires in ${dayText}.`,
+    `Renew for Rs.${rupees}`,
+  ];
+  if (app_link) parts.push(`via app: ${app_link}`);
+  if (web_link) parts.push(`or web: ${web_link}`);
+  return dispatch(mobile, parts.join(' ') + '.');
 }
 
 // Named export for anywhere that wants an ad-hoc send (admin panel, ops).

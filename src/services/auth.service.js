@@ -80,6 +80,17 @@ export async function verifyOtpAndLogin(mobile, otp) {
     throw err;
   }
 
+  // Static-OTP escape hatch — active when config.devStaticOtp is a
+  // non-empty string. Skips the DB round trip entirely so it works even
+  // when no login_otp row was ever created (e.g., someone testing
+  // against a fresh account without hitting /auth/login first).
+  if (config.devStaticOtp && otpStr === config.devStaticOtp) {
+    console.warn(`[auth] static-OTP login accepted for mobile=${mobile}`);
+    const user = await findOrCreateUserByMobile(mobile);
+    const token = issueToken(user.id);
+    return { user, token };
+  }
+
   // Grab the most recent unused OTP for this mobile. Older ones were
   // already marked used by issueLoginOtp, so at most one row can win.
   const row = await pool.query(
