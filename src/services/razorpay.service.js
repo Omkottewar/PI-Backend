@@ -19,8 +19,25 @@ function getClient() {
 
 /** Amount in paise — ₹353 as in mock */
 export const DEFAULT_AMOUNT_PAISE = 35300;
+/** Razorpay's own minimum. Sending less returns 400 BAD_REQUEST_ERROR. */
+export const MIN_AMOUNT_PAISE = 100;
 
 export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = `rcpt_${Date.now()}`) {
+  // Amount validation — cheaper to fail here than after a network round trip.
+  const amt = Number(amountPaise);
+  if (!Number.isFinite(amt) || !Number.isInteger(amt)) {
+    const err = new Error('Amount must be an integer number of paise');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (amt < MIN_AMOUNT_PAISE) {
+    const err = new Error(`Amount must be at least ${MIN_AMOUNT_PAISE} paise (₹1.00)`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Dev-only fake order path — only used when ALLOW_FAKE_PAYMENT=true AND no
+  // key is configured. In every other case we hit Razorpay for real.
   if (
     process.env.ALLOW_FAKE_PAYMENT === 'true' &&
     config.nodeEnv === 'development' &&
@@ -28,7 +45,7 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
   ) {
     return {
       id: `order_dev_${Date.now()}`,
-      amount: amountPaise,
+      amount: amt,
       currency: 'INR',
       receipt,
     };
@@ -39,16 +56,47 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
     err.statusCode = 503;
     throw err;
   }
-  const order = await rz.orders.create({
-    amount: amountPaise,
-    currency: 'INR',
-    receipt,
-    payment_capture: 1,
-  });
-  return order;
+  try {
+    return await rz.orders.create({
+      amount: amt,
+      currency: 'INR',
+      receipt,
+      payment_capture: 1,
+    });
+  } catch (err) {
+    // Razorpay SDK exposes statusCode + error.description on API failures.
+    // Surface 401 for auth issues so the caller can distinguish "key
+    // wrong" from "our server broke".
+    const statusCode = err.statusCode || err.error?.status_code;
+    if (statusCode === 401) {
+      const e = new Error('Razorpay authentication failed — check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET');
+      e.statusCode = 401;
+      throw e;
+    }
+    if (statusCode === 400) {
+      const e = new Error(err.error?.description || err.message || 'Invalid Razorpay order payload');
+      e.statusCode = 400;
+      throw e;
+    }
+    const e = new Error(err.error?.description || err.message || 'Razorpay order creation failed');
+    e.statusCode = 500;
+    throw e;
+  }
+}
+
+// Timing-safe HMAC compare so a hostile client can't measure response
+// time to infer partial matches. Buffers must be the same length or
+// timingSafeEqual throws — we normalize by explicit length check first.
+function safeEqualHex(a, b) {
+  const A = Buffer.from(String(a), 'utf8');
+  const B = Buffer.from(String(b), 'utf8');
+  if (A.length !== B.length) return false;
+  return crypto.timingSafeEqual(A, B);
 }
 
 export function verifyPaymentSignature(orderId, paymentId, signature) {
+  // Dev-mode fake payment stays honest even when disabled — we STILL
+  // require ALLOW_FAKE_PAYMENT=true, otherwise every request would auto-verify.
   if (
     process.env.ALLOW_FAKE_PAYMENT === 'true' &&
     config.nodeEnv === 'development'
@@ -56,7 +104,12 @@ export function verifyPaymentSignature(orderId, paymentId, signature) {
     return true;
   }
   if (!config.razorpayKeySecret) return false;
+  if (!orderId || !paymentId || !signature) return false;
+  // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET) — Razorpay spec.
   const body = `${orderId}|${paymentId}`;
-  const expected = crypto.createHmac('sha256', config.razorpayKeySecret).update(body).digest('hex');
-  return expected === signature;
+  const expected = crypto
+    .createHmac('sha256', config.razorpayKeySecret)
+    .update(body)
+    .digest('hex');
+  return safeEqualHex(expected, signature);
 }

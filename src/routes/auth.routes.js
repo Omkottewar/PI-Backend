@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
-import { verifyOtpAndLogin } from '../services/auth.service.js';
+import { verifyOtpAndLogin, issueLoginOtp } from '../services/auth.service.js';
 import { databaseErrorResponse } from '../utils/dbErrors.js';
 import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/pool.js';
+import { sendLoginOtp } from '../services/sms.service.js';
 
 const router = Router();
 
@@ -15,7 +16,22 @@ router.post(
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    return res.json({ message: 'OTP sent (demo: use 1234)' });
+    try {
+      const mobile = String(req.body.mobile).trim();
+      const otp = await issueLoginOtp(mobile);
+      // Deliver via SMS. The console provider logs the code to stdout —
+      // handy for local dev. Live adapters (msg91/exotel/twilio) receive
+      // it as plain text and ship the templated message.
+      try {
+        await sendLoginOtp(mobile, otp);
+      } catch (e) {
+        console.error('[auth/login] SMS send failed:', e);
+      }
+      return res.json({ message: 'OTP sent' });
+    } catch (err) {
+      console.error('[auth/login] issueLoginOtp failed:', err);
+      return res.status(500).json({ error: 'Could not send OTP — please try again' });
+    }
   }
 );
 

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Renew your QR — QR 4 Emergency</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 0;
+      background: linear-gradient(180deg, #101729 0%, #06090F 60%);
+      color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Ubuntu, "Helvetica Neue", sans-serif;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 32px 20px; }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 20px;
+      padding: 22px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0 0 8px; font-size: 22px; font-weight: 800; letter-spacing: -0.4px; }
+    .sub { margin: 0 0 18px; font-size: 13.5px; color: #94A3B8; line-height: 1.5; }
+    label { display:block; font-size: 11px; letter-spacing: 1.4px; font-weight: 800;
+            color: #FF7A00; margin: 12px 0 6px; }
+    input {
+      width: 100%; box-sizing: border-box;
+      background: rgba(255,255,255,0.06);
+      color: #F8FAFC; border: 1px solid rgba(255,255,255,0.10);
+      padding: 12px 14px; border-radius: 12px; font-size: 15px;
+      outline: none;
+    }
+    input:focus { border-color: #FF7A00; }
+    button {
+      width: 100%; box-sizing: border-box;
+      padding: 14px; border-radius: 14px; border: 0;
+      font-size: 15px; font-weight: 800; letter-spacing: 0.3px;
+      background: linear-gradient(135deg, #FF7A00 0%, #DC2626 100%);
+      color: #fff; cursor: pointer;
+      margin-top: 14px;
+    }
+    button.secondary {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+    button[disabled] { opacity: 0.55; cursor: not-allowed; }
+    .badge {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 10px; font-weight: 800; letter-spacing: 1.4px;
+      color: #FF7A00; background: rgba(255,122,0,0.14);
+      border: 1px solid rgba(255,122,0,0.35);
+    }
+    .qr-row {
+      padding: 14px; border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .qr-row .info { flex: 1; }
+    .qr-row .vehicle {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 15px; font-weight: 800; letter-spacing: 1.4px;
+    }
+    .qr-row .status { font-size: 11px; color: #94A3B8; margin-top: 4px; }
+    .qr-row .status.expired { color: #EF4444; font-weight: 700; }
+    .err {
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #FCA5A5;
+      padding: 12px; border-radius: 12px;
+      font-size: 13px; margin-top: 12px;
+    }
+    .hidden { display: none; }
+    .footer { text-align: center; font-size: 11px; color: #64748B; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <span class="badge">RENEW</span>
+      <h1 style="margin-top:12px;">Renew your QR</h1>
+      <p class="sub">
+        Enter the mobile number registered on your QR. We'll send a login
+        code, then you can pay ₹99 to renew for another year.
+      </p>
+
+      <!-- Step 1: mobile -->
+      <div id="step-mobile">
+        <label for="mobile">Mobile Number</label>
+        <input id="mobile" type="tel" inputmode="numeric" maxlength="10"
+               placeholder="10-digit mobile" />
+        <div class="err hidden" id="err-mobile"></div>
+        <button id="btn-send-otp">Send OTP</button>
+      </div>
+
+      <!-- Step 2: OTP -->
+      <div id="step-otp" class="hidden">
+        <label for="otp">Enter OTP</label>
+        <input id="otp" type="tel" inputmode="numeric" maxlength="4"
+               placeholder="4-digit code" />
+        <div class="err hidden" id="err-otp"></div>
+        <button id="btn-verify-otp">Verify &amp; Continue</button>
+        <button class="secondary" id="btn-back-mobile">Change number</button>
+      </div>
+
+      <!-- Step 3: pick a QR -->
+      <div id="step-list" class="hidden">
+        <p class="sub">Choose the QR you want to renew:</p>
+        <div id="qr-list"></div>
+        <div class="err hidden" id="err-list"></div>
+        <button class="secondary" id="btn-logout">Sign out</button>
+      </div>
+
+      <!-- Step 4: done -->
+      <div id="step-done" class="hidden">
+        <h1 style="margin-top: 6px;">✓ QR renewed</h1>
+        <p class="sub">Your QR is active for another year. You can close this
+          page — the app will show the updated expiry when it next syncs.</p>
+      </div>
+    </div>
+
+    <p class="footer">QR 4 Emergency · Be Nayak</p>
+  </div>
+
+  <!-- Razorpay Checkout -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const show = (id) => {
+      ['step-mobile','step-otp','step-list','step-done'].forEach((s) => {
+        el(s).classList.toggle('hidden', s !== id);
+      });
+    };
+    const showErr = (id, msg) => {
+      const e = el(id); e.textContent = msg; e.classList.remove('hidden');
+    };
+    const hideErr = (id) => el(id).classList.add('hidden');
+
+    let TOKEN = null;
+    let MOBILE = '';
+
+    // ─── Step 1: send OTP ─────────────────────────────────────────────
+    el('btn-send-otp').onclick = async () => {
+      hideErr('err-mobile');
+      const m = el('mobile').value.trim();
+      if (!/^\d{10}$/.test(m)) return showErr('err-mobile', 'Enter a valid 10-digit mobile');
+      MOBILE = m;
+      const btn = el('btn-send-otp'); btn.disabled = true;
+      try {
+        const r = await fetch('/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({mobile: m}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Could not send OTP');
+        show('step-otp');
+      } catch (e) {
+        showErr('err-mobile', e.message);
+      } finally { btn.disabled = false; }
+    };
+
+    // ─── Step 2: verify OTP ───────────────────────────────────────────
+    el('btn-verify-otp').onclick = async () => {
+      hideErr('err-otp');
+      const otp = el('otp').value.trim();
+      if (!/^\d{4}$/.test(otp)) return showErr('err-otp', 'Enter the 4-digit code');
+      const btn = el('btn-verify-otp'); btn.disabled = true;
+      try {
+        const r = await fetch('/auth/verify-otp', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({mobile: MOBILE, otp}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Verification failed');
+        TOKEN = d.token;
+        await loadQrs();
+      } catch (e) {
+        showErr('err-otp', e.message);
+      } finally { btn.disabled = false; }
+    };
+
+    el('btn-back-mobile').onclick = () => { show('step-mobile'); };
+    el('btn-logout').onclick = () => { TOKEN = null; MOBILE = ''; show('step-mobile'); };
+
+    // ─── Step 3: load QRs + render ────────────────────────────────────
+    async function loadQrs() {
+      hideErr('err-list');
+      el('qr-list').innerHTML =
+        '<p class="sub">Loading your QRs…</p>';
+      show('step-list');
+      try {
+        const r = await fetch('/qr/history', {
+          headers: {'Authorization': 'Bearer ' + TOKEN},
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Could not load QRs');
+        const items = d.items || [];
+        if (!items.length) {
+          el('qr-list').innerHTML =
+            '<p class="sub">No QRs on this account.</p>';
+          return;
+        }
+        el('qr-list').innerHTML = '';
+        items.forEach((row) => {
+          const expiry = row.date_of_activation
+            ? new Date(new Date(row.date_of_activation).getTime()
+                       + 365 * 24 * 60 * 60 * 1000)
+            : null;
+          const days = expiry
+            ? Math.ceil((expiry.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+            : null;
+          const isExpired = !row.is_active || (days !== null && days < 0);
+          const statusText = isExpired
+            ? 'Expired' + (days !== null && days < 0 ? ` ${-days} day(s) ago` : '')
+            : days !== null ? `Expires in ${days} day(s)` : 'Active';
+          const div = document.createElement('div');
+          div.className = 'qr-row';
+          div.innerHTML =
+            '<div class="info">' +
+              '<div class="vehicle">' + escapeHtml(row.vehicle_number || '—') + '</div>' +
+              '<div class="status ' + (isExpired ? 'expired' : '') + '">' + statusText + '</div>' +
+            '</div>' +
+            '<button style="width:auto;margin:0;padding:10px 14px;font-size:12px;" ' +
+              'data-id="' + row.id + '" data-vehicle="' + escapeHtml(row.vehicle_number || '') + '">' +
+              'Renew ₹99' +
+            '</button>';
+          el('qr-list').appendChild(div);
+          div.querySelector('button').addEventListener('click', (ev) => {
+            const id = parseInt(ev.currentTarget.dataset.id, 10);
+            const veh = ev.currentTarget.dataset.vehicle;
+            startRenewal(id, veh);
+          });
+        });
+      } catch (e) {
+        showErr('err-list', e.message);
+      }
+    }
+
+    // ─── Step 4: create renewal order + open Razorpay ─────────────────
+    async function startRenewal(qrId, vehicle) {
+      hideErr('err-list');
+      try {
+        const r = await fetch('/qr/' + qrId + '/renew/order', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + TOKEN,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Could not start renewal');
+        const rzp = new Razorpay({
+          key: d.key_id,
+          amount: d.amount,
+          currency: d.currency || 'INR',
+          name: 'QR 4 Emergency',
+          description: 'Renew ' + vehicle,
+          order_id: d.order_id,
+          prefill: {contact: MOBILE},
+          handler: async (resp) => {
+            try {
+              const v = await fetch('/qr/' + qrId + '/renew/verify', {
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Bearer ' + TOKEN,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: resp.razorpay_order_id,
+                  razorpay_payment_id: resp.razorpay_payment_id,
+                  razorpay_signature: resp.razorpay_signature,
+                }),
+              });
+              const vd = await v.json().catch(() => ({}));
+              if (!v.ok) throw new Error(vd.error || 'Renewal verification failed');
+              show('step-done');
+            } catch (e) {
+              showErr('err-list', e.message);
+            }
+          },
+          modal: { escape: true },
+        });
+        rzp.open();
+      } catch (e) {
+        showErr('err-list', e.message);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>

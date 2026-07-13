@@ -3,8 +3,18 @@ import { pool } from '../db/pool.js';
 import { config } from '../config/index.js';
 import { verifyPaymentSignature } from './razorpay.service.js';
 import { sendInvoiceEmail } from './mail.service.js';
+import { sendQrCreated } from './sms.service.js';
 
-const RELATIONS = new Set(['Father', 'Mother', 'Sister', 'Brother', 'Other']);
+// Client-facing relation groups. Stored verbatim in family_details.relation.
+// Grouped as slash-pairs so the mobile UI can show 5 buttons instead of 9
+// separate radios. Migration 018 rewrites legacy singular values.
+const RELATIONS = new Set([
+  'Father/Mother',
+  'Sister/Brother',
+  'Husband/Wife',
+  'Son/Daughter',
+  'Other',
+]);
 
 export function validateFamilyRelation(relation) {
   return RELATIONS.has(relation);
@@ -32,12 +42,20 @@ export async function createQrRecord({
   shipping_pincode = null,
   shipping_country = null,
 }) {
-  // Raj - Commented for testing purpose
-  // if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
-  //   const err = new Error('Invalid payment signature');
-  //   err.statusCode = 400;
-  //   throw err;
-  // }
+  // Verify the Razorpay HMAC BEFORE any DB writes. Manual activations
+  // pass 'manual' sentinel strings (see alert.routes.js manual_activate)
+  // and bypass this — those flow through referral-code auth instead.
+  const isManualBypass =
+    razorpay_order_id === 'manual' &&
+    razorpay_payment_id === 'manual' &&
+    razorpay_signature === 'manual';
+  if (!isManualBypass) {
+    if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+      const err = new Error('Invalid payment signature');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
 
   if (!family || !Array.isArray(family) || family.length < 1 || family.length > 5) {
     const err = new Error('Family must include 1 to 5 contacts');
@@ -143,6 +161,18 @@ export async function createQrRecord({
     // row is committed.
     sendInvoiceEmail(qr, family).catch((e) =>
       console.error('[qr/service] sendInvoiceEmail rejected unexpectedly:', e)
+    );
+
+    // Fire-and-forget SMS: "Your QR for MHXXXX (owner ...) is generated,
+    // sticker in 3-5 days". Deliberately sent to the OWNER mobile stored
+    // on the QR row (which for manual activations is the person who
+    // scratched the sticker, not the user's login mobile).
+    sendQrCreated({
+      mobile: qr.mobile,
+      vehicle_number: qr.vehicle_number,
+      owner_number: qr.mobile,
+    }).catch((e) =>
+      console.error('[qr/service] sendQrCreated rejected unexpectedly:', e)
     );
 
     return { ...qr, alertUrl };

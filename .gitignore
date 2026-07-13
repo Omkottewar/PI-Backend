@@ -1,3 +1,10 @@
 node_modules/
 .env
 *.log
+
+# Firebase service-account keys — must never be committed. The backend
+# reads the same JSON out of the FIREBASE_SERVICE_ACCOUNT_JSON env var on
+# Render, so there is no reason for these files to be in the repo.
+firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+service-account*.json

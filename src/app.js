@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth.routes.js';
 import profileRoutes from './routes/profile.routes.js';
 import qrRoutes from './routes/qr.routes.js';
@@ -13,9 +15,41 @@ import adminRoutes from './routes/admin.routes.js';
 
 const app = express();
 
+// Trust Render's proxy so req.ip is the real client, not the LB. Required
+// for express-rate-limit to key on the actual caller.
+app.set('trust proxy', 1);
+
+// Security headers. `contentSecurityPolicy: false` keeps the inline
+// scripts inside alert-page.html and admin.html working — we render
+// those pages ourselves so a bespoke CSP is safe to skip for now.
+app.use(helmet({ contentSecurityPolicy: false }));
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ─── Rate limiting ──────────────────────────────────────────────────────
+// Two tiers:
+//   • Sensitive (auth + alert): 30/min/IP — enough for a human, tight
+//     enough that OTP/scan enumeration is impractical.
+//   • Global: 300/min/IP — safety net for everything else.
+// The middleware runs before route handlers, so any request past the
+// limit fails fast with 429.
+const authAlertLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please try again in a minute' },
+});
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please try again in a minute' },
+});
+app.use(globalLimiter);
 
 // ─── Request / response tracer ──────────────────────────────────────────
 // Prints one line per incoming request (method + path + optional body
@@ -59,7 +93,7 @@ app.use((req, res, next) => {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.use('/auth', authRoutes);
+app.use('/auth', authAlertLimiter, authRoutes);
 app.use('/profile', profileRoutes);
 app.use('/qr', qrRoutes);
 app.use('/payments', paymentRoutes);
@@ -76,11 +110,17 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Alert web + APIs — GET page, POST verify, POST call */
-app.use('/alert', alertRoutes);
+app.use('/alert', authAlertLimiter, alertRoutes);
 
 // Admin single-page UI — the /api/admin/* routes are the actual backend.
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/admin.html'));
+});
+
+// Browser fallback for the expiry-countdown SMS "Renew via {web_link}" link.
+// Owner enters mobile → OTP → picks a QR → Razorpay checkout → renewal.
+app.get('/renew', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/renew.html'));
 });
 
 app.get('/call/:callId', (req, res) => {

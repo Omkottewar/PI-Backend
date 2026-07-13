@@ -36,6 +36,12 @@ export const config = {
     companyEmail: process.env.INVOICE_COMPANY_EMAIL || 'support@cpnetwork.in',
     companyPhone: process.env.INVOICE_COMPANY_PHONE || '+91-9960049208',
   },
+  // Renewal pricing. Kept separate from the first-year price (in
+  // DEFAULT_AMOUNT_PAISE) so promotional or campaign renewal rates don't
+  // affect new-QR purchases. ₹99 default per the T&C.
+  renewal: {
+    amountPaise: parseInt(process.env.RENEWAL_AMOUNT_PAISE || '9900', 10),
+  },
   // Home-page promo video. Point PROMO_VIDEO_URL at any HTTPS MP4 (Supabase
   // Storage signed URL, S3, CloudFront, etc.). If unset, the app hides the
   // section — safe default for local dev.

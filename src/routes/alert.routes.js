@@ -9,6 +9,10 @@ import {
   createQrRecord,
 } from '../services/qr.service.js';
 import { notifyUser } from '../services/push.service.js';
+import {
+  sendQrScannedOwnerTap,
+  sendQrScannedFamilyTap,
+} from '../services/sms.service.js';
 import { v4 as uuidv4 } from 'uuid';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -28,27 +32,32 @@ function loadAlertPageHtml() {
 // geolocation) and the two-phase call_logs pipeline (pending row on
 // /exotel/lookup, UPDATE on /api/exotel/call-completion).
 
+// POST /:uniqueId/verify — historically required a vehicle-number match
+// as an anti-scraping gate. That gate was dropped so bystanders reach the
+// call UI in one tap after scanning. If a vehicle_number is still passed
+// (older mobile clients / manual page test rigs) we cross-check it, but
+// mismatch is a soft warning, not a failure.
 router.post(
   '/:uniqueId/verify',
-  body('vehicle_number').trim().notEmpty(),
+  body('vehicle_number').optional({ nullable: true }).isString().trim(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
     const { uniqueId } = req.params;
-    const vehicleNorm = String(req.body.vehicle_number).trim().toUpperCase();
     const qr = await getQrByUniqueId(uniqueId);
     if (!qr) {
       return res.status(404).json({ error: 'Not found' });
     }
-    if (qr.vehicle_number !== vehicleNorm) {
-      return res.status(400).json({ error: 'Vehicle number does not match our records' });
+    if (qr.is_active === false) {
+      return res.status(400).json({ error: 'This QR is no longer active' });
     }
 
     const family = await getFamilyByQrId(qr.id);
     return res.json({
       verified: true,
+      vehicle_number: qr.vehicle_number, // useful for the header on the alert page
       owner: {
         nameMasked: maskFullName(qr.name),
         mobileMasked: maskMobile(qr.mobile),
@@ -181,6 +190,18 @@ router.post(
           userAgent,
         ]
       );
+
+      // Fire-and-forget SMS branch — owner tap vs family tap gets a
+      // different message body per product spec.
+      if (contact_kind === 'owner') {
+        sendQrScannedOwnerTap(qr.id).catch((e) =>
+          console.error('[alert/event] sendQrScannedOwnerTap:', e)
+        );
+      } else if (contact_kind === 'family') {
+        sendQrScannedFamilyTap(qr.id).catch((e) =>
+          console.error('[alert/event] sendQrScannedFamilyTap:', e)
+        );
+      }
 
       // Fire-and-forget push to the QR owner: "your QR was just scanned".
       // Runs after res.json so a slow FCM call can't stretch the response.

@@ -126,13 +126,14 @@
     <p class="sub">Please activate it as soon as possible to save your life.</p>
   </div>
 
+  <!-- step-verify retained as a hidden failsafe. The bystander flow now
+       auto-fetches contacts on load; this card only surfaces if the
+       auto-fetch throws, giving the user a manual retry. -->
   <div class="card hidden" id="step-verify">
-    <h1>Verify vehicle</h1>
-    <p class="sub">Enter the vehicle number shown on this QR to view masked emergency contacts.</p>
+    <h1>Loading contacts…</h1>
+    <p class="sub">One moment.</p>
     <div class="err hidden" id="verify-err"></div>
-    <label for="vehicle">Vehicle number</label>
-    <input id="vehicle" placeholder="e.g. MH12AB1234" autocomplete="off" />
-    <button type="button" id="btn-verify">Continue</button>
+    <button type="button" id="btn-verify">Retry</button>
   </div>
 
   <div class="card hidden" id="step-result">
@@ -185,10 +186,10 @@
         <label>Relationship *</label>
         <select class="reg-fam-rel">
           <option value="">Select Relation</option>
-          <option value="Father">Father</option>
-          <option value="Mother">Mother</option>
-          <option value="Sister">Sister</option>
-          <option value="Brother">Brother</option>
+          <option value="Father/Mother">Father / Mother</option>
+          <option value="Sister/Brother">Sister / Brother</option>
+          <option value="Husband/Wife">Husband / Wife</option>
+          <option value="Son/Daughter">Son / Daughter</option>
           <option value="Other">Other</option>
         </select>
       </div>
@@ -234,51 +235,47 @@
       document.getElementById('validation-modal').style.display = 'flex';
     }
 
-    // Checking status on load
+    // Checking status on load. A registered, non-expired QR now goes
+    // straight to the contact list — no vehicle-number gate. loadContacts()
+    // handles the actual fetch + render.
     async function init() {
       try {
         const res = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/status");
         const data = await res.json();
-        
+
         if (!data.exists) {
           showStep('linkQr');
         } else if (data.expired) {
           showStep('expired');
         } else {
-          showStep('verify');
+          await loadContacts();
         }
       } catch (e) {
         showModal('Failed to load status');
-        showStep('verify'); // fallback
+        showStep('verify'); // manual retry fallback
       }
     }
 
     init();
 
     // -----------------------------------------------------
-    // Verification Flow (Verify Vehicle for existing QR)
+    // Contact fetch — no user input required.
     // -----------------------------------------------------
-    document.getElementById("btn-verify").onclick = async () => {
-      const vehicle = document.getElementById("vehicle").value.trim();
-      if (vehicle.length < 4) return showModal("Enter a valid vehicle number");
-      
-      const btn = document.getElementById("btn-verify");
-      btn.disabled = true;
+    async function loadContacts() {
+      showStep('verify'); // temporary "loading" surface until fetch resolves
       try {
         const res = await fetch(base + "/alert/" + encodeURIComponent(UNIQUE_ID) + "/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vehicle_number: vehicle }),
+          body: JSON.stringify({}),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showModal(data.error || "Verification failed");
-          btn.disabled = false;
+          showModal(data.error || "Could not load contacts");
           return;
         }
-        window.__verifiedVehicle = vehicle;
         showStep('result');
-        
+
         document.getElementById("owner-line").innerHTML =
           "<div>Name: " + data.owner.nameMasked + "</div>" +
           "<div>Mobile: " + data.owner.mobileMasked + "</div>" +
@@ -299,8 +296,9 @@
       } catch (e) {
         showModal("Network error");
       }
-      btn.disabled = false;
-    };
+    }
+
+    document.getElementById("btn-verify").onclick = loadContacts;
 
     // Tapping a contact card is a two-step commit:
     //   1. POST /select — pin this contact as the IVR's routing target.
@@ -459,10 +457,10 @@
         <label>Relationship *</label>
         <select class="reg-fam-rel">
           <option value="">Select Relation</option>
-          <option value="Father">Father</option>
-          <option value="Mother">Mother</option>
-          <option value="Sister">Sister</option>
-          <option value="Brother">Brother</option>
+          <option value="Father/Mother">Father / Mother</option>
+          <option value="Sister/Brother">Sister / Brother</option>
+          <option value="Husband/Wife">Husband / Wife</option>
+          <option value="Son/Daughter">Son / Daughter</option>
           <option value="Other">Other</option>
         </select>
       `;

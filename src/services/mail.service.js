@@ -56,7 +56,7 @@ function buildInvoiceHtml(qr, family) {
     <div style="max-width:620px;margin:0 auto;padding:32px 20px;">
       <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.05);">
         <div style="background:linear-gradient(135deg,#FF7A00 0%,#DC2626 100%);padding:24px 28px;color:#fff;">
-          <div style="font-size:12px;letter-spacing:2.4px;font-weight:800;opacity:0.85;">QR 4 EMERGENCY · BE NAIK</div>
+          <div style="font-size:12px;letter-spacing:2.4px;font-weight:800;opacity:0.85;">QR 4 EMERGENCY · BE NAYAK</div>
           <div style="font-size:24px;font-weight:800;margin-top:6px;">Invoice ${escapeHtml(invoiceNumber(qr))}</div>
         </div>
         <div style="padding:24px 28px;">
