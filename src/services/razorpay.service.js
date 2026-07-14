@@ -65,21 +65,25 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
     });
   } catch (err) {
     // Razorpay SDK exposes statusCode + error.description on API failures.
-    // Surface 401 for auth issues so the caller can distinguish "key
-    // wrong" from "our server broke".
-    const statusCode = err.statusCode || err.error?.status_code;
-    if (statusCode === 401) {
-      const e = new Error('Razorpay authentication failed — check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET');
-      e.statusCode = 401;
+    // We map every upstream failure to 502 Bad Gateway — NEVER a 401 —
+    // because a 401 back to the mobile client would trigger the
+    // "session expired" handler and log the user out for something that
+    // has nothing to do with their session (it's OUR server auth failing
+    // to Razorpay). The response body carries the real cause so the
+    // route handler can still log/surface it.
+    const upstream = err.statusCode || err.error?.status_code;
+    if (upstream === 401) {
+      const e = new Error('Razorpay authentication failed on the server — check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the backend');
+      e.statusCode = 502;
       throw e;
     }
-    if (statusCode === 400) {
+    if (upstream === 400) {
       const e = new Error(err.error?.description || err.message || 'Invalid Razorpay order payload');
       e.statusCode = 400;
       throw e;
     }
     const e = new Error(err.error?.description || err.message || 'Razorpay order creation failed');
-    e.statusCode = 500;
+    e.statusCode = 502;
     throw e;
   }
 }
