@@ -24,17 +24,25 @@ export const MIN_AMOUNT_PAISE = 100;
 
 export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = `rcpt_${Date.now()}`) {
   // Amount validation — cheaper to fail here than after a network round trip.
-  const amt = Number(amountPaise);
-  if (!Number.isFinite(amt) || !Number.isInteger(amt)) {
+  const requested = Number(amountPaise);
+  if (!Number.isFinite(requested) || !Number.isInteger(requested)) {
     const err = new Error('Amount must be an integer number of paise');
     err.statusCode = 400;
     throw err;
   }
-  if (amt < MIN_AMOUNT_PAISE) {
+  if (requested < MIN_AMOUNT_PAISE) {
     const err = new Error(`Amount must be at least ${MIN_AMOUNT_PAISE} paise (₹1.00)`);
     err.statusCode = 400;
     throw err;
   }
+  // TEST_CHARGE_AMOUNT_PAISE lets us validate the live gateway with a
+  // tiny real charge (e.g., ₹1) while all upstream code + UI keeps
+  // reasoning about the real price. Actual amount sent to Razorpay is
+  // this override; the return value exposes both so the frontend can
+  // show "Pay ₹299" while charging ₹1.
+  const amt = config.testChargeAmountPaise > 0
+    ? config.testChargeAmountPaise
+    : requested;
 
   // Dev-only fake order path — only used when ALLOW_FAKE_PAYMENT=true AND no
   // key is configured. In every other case we hit Razorpay for real.
@@ -46,6 +54,7 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
     return {
       id: `order_dev_${Date.now()}`,
       amount: amt,
+      intended_amount: requested,
       currency: 'INR',
       receipt,
     };
@@ -57,12 +66,16 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
     throw err;
   }
   try {
-    return await rz.orders.create({
+    const order = await rz.orders.create({
       amount: amt,
       currency: 'INR',
       receipt,
       payment_capture: 1,
     });
+    // Attach intended_amount so callers can show the real price on the
+    // UI while Razorpay itself will charge order.amount (which equals
+    // the test override when active).
+    return { ...order, intended_amount: requested };
   } catch (err) {
     // Razorpay SDK exposes statusCode + error.description on API failures.
     // We map every upstream failure to 502 Bad Gateway — NEVER a 401 —

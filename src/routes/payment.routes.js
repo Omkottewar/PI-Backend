@@ -22,7 +22,8 @@ router.post('/razorpay/order', requireAuth, async (req, res) => {
     const order = await createOrder(Number.isFinite(amount) ? amount : DEFAULT_AMOUNT_PAISE);
     return res.json({
       order_id: order.id,
-      amount: order.amount,
+      amount: order.amount,                    // what Razorpay will charge
+      intended_amount: order.intended_amount,  // what the UI should display
       currency: order.currency,
       key_id: config.razorpayKeyId || 'rzp_test_dev',
       demo_mode: !config.razorpayKeyId,

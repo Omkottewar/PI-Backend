@@ -177,7 +177,8 @@ router.post('/:id/renew/order', requireAuth, async (req, res) => {
     const order = await createOrder(amount, `renew_${qrId}_${Date.now()}`);
     return res.json({
       order_id: order.id,
-      amount: order.amount,
+      amount: order.amount,                    // what Razorpay will charge
+      intended_amount: order.intended_amount,  // what the UI should display
       currency: order.currency || 'INR',
       key_id: config.razorpayKeyId || 'rzp_test_dev',
       qr_id: qrId,

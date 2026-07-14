@@ -49,6 +49,18 @@ export const config = {
   renewal: {
     amountPaise: parseInt(process.env.RENEWAL_AMOUNT_PAISE || '9900', 10),
   },
+  // Live-mode smoke test override. When set to a positive integer (in
+  // paise), every Razorpay order is created with THIS amount instead
+  // of whatever the caller requested — a way to validate the live
+  // credential + full payment round-trip while charging only ₹1.
+  // Unset it (or set to '') the moment testing is done — otherwise
+  // every real customer is charged the test amount instead of ₹299.
+  testChargeAmountPaise: (() => {
+    const raw = (process.env.TEST_CHARGE_AMOUNT_PAISE || '').trim();
+    if (!raw) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })(),
   // Home-page promo video. Point PROMO_VIDEO_URL at any HTTPS MP4 (Supabase
   // Storage signed URL, S3, CloudFront, etc.). If unset, the app hides the
   // section — safe default for local dev.
@@ -86,6 +98,16 @@ export function assertConfig() {
     console.warn(
       `[config] WARNING: DEV_STATIC_OTP is set to "${config.devStaticOtp}". ` +
       `Every user can log in with this code. Unset it once SMS_PROVIDER is live.`
+    );
+  }
+  // Same loud warning for the payment override — real customers would
+  // otherwise be charged ₹1 (or whatever this is) instead of the real
+  // subscription price. This is a debug knob, not a production feature.
+  if (config.testChargeAmountPaise > 0) {
+    console.warn(
+      `[config] WARNING: TEST_CHARGE_AMOUNT_PAISE=${config.testChargeAmountPaise} ` +
+      `— EVERY Razorpay order will charge this amount, not the real price. ` +
+      `Unset when you're done testing.`
     );
   }
 }
