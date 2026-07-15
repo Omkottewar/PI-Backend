@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import {
   startExpiryScheduler,
   startExpiryCountdownScheduler,
+  startCallLogsCleanupScheduler,
 } from './services/scheduler.service.js';
 
 assertConfig();
@@ -12,6 +13,8 @@ assertConfig();
 startExpiryScheduler();
 // Start last-7-days SMS countdown to owners whose QR is about to expire.
 startExpiryCountdownScheduler();
+// Mark stale in-progress call_logs as timeout every 30 min.
+startCallLogsCleanupScheduler();
 
 const httpServer = createServer(app);
 

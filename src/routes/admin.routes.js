@@ -251,4 +251,79 @@ router.get('/manual-qr/export.csv', requireAdmin, async (req, res) => {
   }
 });
 
+// ─── GET /api/admin/payments/orphaned ───────────────────────────────────
+// Payments stuck in 'created' status past a grace window (default 10m).
+// Two causes:
+//   a) User closed the Razorpay modal — no charge, safe to delete after
+//      a longer grace (say 24h)
+//   b) Razorpay charged but our /qr/create or /renew/verify failed before
+//      markPaymentVerified — customer paid, no QR, refund required
+// Admin ops should query this daily and cross-reference against the
+// Razorpay dashboard to figure out which case each row is.
+router.get('/payments/orphaned', requireAdmin, async (req, res) => {
+  try {
+    const olderThanMinutes = Math.max(
+      1,
+      parseInt(req.query.older_than_minutes, 10) || 10
+    );
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const { listOrphanedPayments } = await import('../services/payment.service.js');
+    const items = await listOrphanedPayments({ olderThanMinutes, limit });
+    return res.json({ items, older_than_minutes: olderThanMinutes, limit });
+  } catch (err) {
+    console.error('[admin/payments/orphaned] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/admin/payments ────────────────────────────────────────────
+// Recent Razorpay orders + verifications for reconciliation against the
+// Razorpay dashboard. Joins in vehicle_number + user_mobile so admin
+// can eyeball who paid for what without a second query.
+//   Query params:
+//     ?status=created|verified|failed   filter by status
+//     ?limit=100 &offset=0
+router.get('/payments', requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const clauses = [];
+    const params = [];
+    if (['created', 'verified', 'failed'].includes(status)) {
+      params.push(status);
+      clauses.push(`p.status = $${params.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM payments p ${where}`,
+      params
+    );
+    const total = countRes.rows[0].total;
+
+    params.push(limit, offset);
+    const rows = await pool.query(
+      `SELECT p.id, p.user_id, p.qr_id, p.purpose,
+              p.razorpay_order_id, p.razorpay_payment_id,
+              p.amount_paise, p.intended_amount_paise, p.currency,
+              p.status, p.error_message, p.created_at, p.verified_at,
+              q.vehicle_number,
+              u.mobile AS user_mobile
+         FROM payments p
+         LEFT JOIN qrdata q ON q.id = p.qr_id
+         LEFT JOIN users u  ON u.id = p.user_id
+         ${where}
+         ORDER BY p.created_at DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    return res.json({ items: rows.rows, total, limit, offset });
+  } catch (err) {
+    console.error('[admin/payments] error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

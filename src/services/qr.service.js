@@ -4,6 +4,7 @@ import { config } from '../config/index.js';
 import { verifyPaymentSignature } from './razorpay.service.js';
 import { sendInvoiceEmail } from './mail.service.js';
 import { sendQrCreated } from './sms.service.js';
+import { markPaymentVerified, markPaymentFailed } from './payment.service.js';
 
 // Client-facing relation groups. Stored verbatim in family_details.relation.
 // Grouped as slash-pairs so the mobile UI can show 5 buttons instead of 9
@@ -51,6 +52,11 @@ export async function createQrRecord({
     razorpay_signature === 'manual';
   if (!isManualBypass) {
     if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+      // Record the failed attempt for reconciliation, then reject.
+      markPaymentFailed({
+        razorpayOrderId: razorpay_order_id,
+        errorMessage: 'signature_mismatch',
+      });
       const err = new Error('Invalid payment signature');
       err.statusCode = 400;
       throw err;
@@ -155,6 +161,18 @@ export async function createQrRecord({
     await client.query('COMMIT');
     const alertUrl = `${config.publicAppUrl}/alert/${uniqueId}?digits=${qr.digits}`;
 
+    // Link the payment audit row to the freshly-created QR and mark
+    // the payment as verified. Manual activations skip this — they
+    // never had a Razorpay order in the first place.
+    if (!isManualBypass) {
+      markPaymentVerified({
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        qrId: qr.id,
+      });
+    }
+
     // Fire-and-forget invoice email. Errors are swallowed inside the
     // service so a flaky SMTP never masks a successful activation. We
     // don't await it — the caller sees the response the moment the DB
@@ -178,6 +196,30 @@ export async function createQrRecord({
     return { ...qr, alertUrl };
   } catch (e) {
     await client.query('ROLLBACK');
+    // Postgres unique-violation code — the vehicle_number UNIQUE index
+    // from migration 021 fires here under a concurrent submit race.
+    // Convert the raw DB error into a user-friendly 400 AND record the
+    // payment as failed so the customer's Razorpay charge is visible
+    // for manual refund reconciliation.
+    if (e && e.code === '23505') {
+      if (!isManualBypass && razorpay_order_id) {
+        markPaymentFailed({
+          razorpayOrderId: razorpay_order_id,
+          errorMessage: 'vehicle_number_conflict_after_payment',
+        });
+      }
+      const err = new Error('Vehicle number already registered. If you were just charged, contact support with your payment ID for a refund.');
+      err.statusCode = 400;
+      throw err;
+    }
+    // Any other post-signature failure is even worse — customer paid,
+    // our end broke. Mark it for the reconciliation cron to pick up.
+    if (!isManualBypass && razorpay_order_id) {
+      markPaymentFailed({
+        razorpayOrderId: razorpay_order_id,
+        errorMessage: `post_payment_error: ${e.message || 'unknown'}`,
+      });
+    }
     throw e;
   } finally {
     client.release();

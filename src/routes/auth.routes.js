@@ -19,13 +19,26 @@ router.post(
     try {
       const mobile = String(req.body.mobile).trim();
       const otp = await issueLoginOtp(mobile);
-      // Deliver via SMS. The console provider logs the code to stdout —
-      // handy for local dev. Live adapters (msg91/exotel/twilio) receive
-      // it as plain text and ship the templated message.
+      // Deliver via SMS. The console provider always returns ok:true;
+      // live adapters (msg91/exotel/twilio) return {ok:false, error}
+      // on delivery failure. If SMS actually fails, we surface a 503
+      // so the client can show "couldn't send SMS" instead of a
+      // misleading "OTP sent" that never arrives.
+      let smsResult;
       try {
-        await sendLoginOtp(mobile, otp);
+        smsResult = await sendLoginOtp(mobile, otp);
       } catch (e) {
-        console.error('[auth/login] SMS send failed:', e);
+        console.error('[auth/login] SMS send threw:', e);
+        smsResult = { ok: false, error: e.message || 'sms_error' };
+      }
+      if (smsResult && smsResult.ok === false && smsResult.reason !== 'not_configured') {
+        // Provider is configured but the send actually failed. Don't
+        // pretend it worked. The DEV_STATIC_OTP escape hatch is
+        // unaffected — those users can still log in with 1234.
+        console.error('[auth/login] SMS dispatch reported failure', smsResult);
+        return res.status(503).json({
+          error: 'Could not deliver OTP right now — please try again in a moment',
+        });
       }
       return res.json({ message: 'OTP sent' });
     } catch (err) {

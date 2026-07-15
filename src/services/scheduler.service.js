@@ -123,3 +123,34 @@ export function startExpiryCountdownScheduler() {
   const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
   setInterval(run, TWENTY_FOUR_HOURS);
 }
+
+// ─── Stale in-progress call_logs cleanup ────────────────────────────────
+// /exotel/lookup inserts a pending call_logs row (status='in-progress')
+// that the completion webhook is supposed to UPDATE. If Exotel's
+// callback never arrives (network failure, service outage, etc.), the
+// row sits in-progress forever — which shows up as a "call in progress"
+// tile in the owner's app indefinitely. Marks anything older than 30
+// minutes as 'timeout' so the History tab reflects reality.
+export function startCallLogsCleanupScheduler() {
+  const run = async () => {
+    console.log('[Scheduler] Running stale call_logs cleanup...');
+    try {
+      const r = await pool.query(`
+        UPDATE call_logs
+           SET status = 'timeout',
+               end_time = COALESCE(end_time, NOW())
+         WHERE status = 'in-progress'
+           AND start_time IS NOT NULL
+           AND start_time < NOW() - INTERVAL '30 minutes'
+      `);
+      if (r.rowCount > 0) {
+        console.log(`[Scheduler] Marked ${r.rowCount} stale call_logs as timeout.`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] call_logs cleanup failed:', err);
+    }
+  };
+  run();
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  setInterval(run, THIRTY_MINUTES);
+}

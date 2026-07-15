@@ -12,6 +12,11 @@ import {
 } from '../services/qr.service.js';
 import { createOrder, verifyPaymentSignature } from '../services/razorpay.service.js';
 import { config } from '../config/index.js';
+import {
+  recordOrderCreated,
+  markPaymentVerified,
+  markPaymentFailed,
+} from '../services/payment.service.js';
 
 const router = Router();
 
@@ -175,6 +180,16 @@ router.post('/:id/renew/order', requireAuth, async (req, res) => {
 
     const amount = config.renewal.amountPaise;
     const order = await createOrder(amount, `renew_${qrId}_${Date.now()}`);
+    // Renewal already knows the qr_id, so link it immediately.
+    recordOrderCreated({
+      userId: req.userId,
+      qrId,
+      purpose: 'qr_renew',
+      razorpayOrderId: order.id,
+      amountPaise: order.amount,
+      intendedAmountPaise: order.intended_amount ?? order.amount,
+      currency: order.currency || 'INR',
+    });
     return res.json({
       order_id: order.id,
       amount: order.amount,                    // what Razorpay will charge
@@ -214,17 +229,38 @@ router.post(
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+      markPaymentFailed({
+        razorpayOrderId: razorpay_order_id,
+        errorMessage: 'signature_mismatch',
+      });
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
+    // Wrap the ownership check + UPDATE in a single transaction with a
+    // row-level lock so a concurrent delete can't yank the qrdata row
+    // between our SELECT and UPDATE. Without this, a paid customer
+    // could get a 404 while their ₹99 is already gone.
+    const client = await pool.connect();
     try {
-      const own = await pool.query(
-        `SELECT id FROM qrdata WHERE id = $1 AND user_id = $2`,
+      await client.query('BEGIN');
+      const own = await client.query(
+        `SELECT id FROM qrdata
+          WHERE id = $1 AND user_id = $2
+          FOR UPDATE`,
         [qrId, req.userId]
       );
-      if (!own.rows.length) return res.status(404).json({ error: 'QR not found' });
+      if (!own.rows.length) {
+        await client.query('ROLLBACK');
+        // Payment was collected but the QR is gone. Mark the audit row
+        // so admin knows to refund.
+        markPaymentFailed({
+          razorpayOrderId: razorpay_order_id,
+          errorMessage: 'qr_deleted_before_renewal_verify',
+        });
+        return res.status(404).json({ error: 'QR not found — this payment needs a manual refund. Contact support with your payment ID.' });
+      }
 
-      const r = await pool.query(
+      const r = await client.query(
         `UPDATE qrdata
             SET is_active = true,
                 date_of_activation = GREATEST(
@@ -235,7 +271,15 @@ router.post(
           RETURNING id, vehicle_number, is_active, date_of_activation`,
         [qrId]
       );
+      await client.query('COMMIT');
       const row = r.rows[0];
+      // Mark the payment as verified now that the QR renewal succeeded.
+      markPaymentVerified({
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        qrId: row.id,
+      });
       console.log(`[qr/renew/verify] user=${req.userId} qr_id=${qrId} new_activation=${row.date_of_activation}`);
       return res.json({
         ok: true,
@@ -245,8 +289,18 @@ router.post(
         date_of_activation: row.date_of_activation,
       });
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      // Customer's card was already charged before we got here. Mark
+      // the payment as failed so the daily orphaned-payment report
+      // catches it for manual refund.
+      markPaymentFailed({
+        razorpayOrderId: razorpay_order_id,
+        errorMessage: `renew_verify_error: ${err.message}`,
+      });
       console.error('[qr/renew/verify] error:', err);
       return res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   }
 );

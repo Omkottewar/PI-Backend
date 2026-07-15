@@ -92,6 +92,32 @@ export function assertConfig() {
   if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET is required in production');
   }
+
+  // Prod-mode escape hatches that must NEVER be active with real users.
+  // Refuse to boot rather than silently backdoor everyone's account or
+  // charge everyone ₹1 instead of the real subscription price.
+  if (process.env.NODE_ENV === 'production') {
+    if (config.devStaticOtp) {
+      throw new Error(
+        'DEV_STATIC_OTP must be unset in production — refusing to boot with a shared login backdoor.'
+      );
+    }
+    if (config.testChargeAmountPaise > 0) {
+      throw new Error(
+        `TEST_CHARGE_AMOUNT_PAISE=${config.testChargeAmountPaise} must be unset in production — refusing to boot with a payment-amount override.`
+      );
+    }
+  }
+
+  // Renewal amount sanity check. Below 100 paise (₹1) is Razorpay's own
+  // minimum; anything less would 400 at order-create time. Catch it at
+  // boot so a typo in RENEWAL_AMOUNT_PAISE doesn't only surface when a
+  // real customer tries to renew.
+  if (!Number.isFinite(config.renewal.amountPaise) || config.renewal.amountPaise < 100) {
+    throw new Error(
+      `RENEWAL_AMOUNT_PAISE=${config.renewal.amountPaise} is below Razorpay minimum (100 paise / ₹1)`
+    );
+  }
   // Loud warning if the static-OTP escape hatch is enabled — so we don't
   // silently ship a "1234 works for everyone" backdoor into production.
   if (config.devStaticOtp) {
