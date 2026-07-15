@@ -71,6 +71,28 @@ router.post(
       }
     }
 
+    // Before doing anything, defensively resync the digits sequence to
+    // MAX(digits) in the table. Migration 022 does this once, but a
+    // subsequent DB restore or manual data load could put us out of
+    // sync again — cheaper to fix on every mint than to fail one.
+    // No-op when sequence is already ahead.
+    try {
+      await pool.query(`
+        SELECT setval('qrdata_digits_manual_seq',
+                      GREATEST(
+                        (SELECT COALESCE(MAX(CAST(digits AS INT)), 0)
+                           FROM manual_qr WHERE digits ~ '^[0-9]+$'),
+                        (SELECT COALESCE(MAX(CAST(digits AS INT)), 0)
+                           FROM qrdata
+                          WHERE is_manual = true AND digits ~ '^[0-9]+$'),
+                        70000
+                      ),
+                      true)
+      `);
+    } catch (e) {
+      console.warn('[admin/mint] pre-mint sequence resync skipped:', e.message);
+    }
+
     const created = [];
     const client = await pool.connect();
     try {
@@ -104,15 +126,25 @@ router.post(
       return res.json({ ok: true, count, items: withUrls });
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('[admin/mint] error:', err);
+      // Log the specific constraint so future issues aren't a mystery.
+      console.error(
+        '[admin/mint] error:',
+        err.code, err.constraint || '(no constraint)', err.detail || '', err.message
+      );
       if (err.code === '23505') {
-        // Unique constraints on manual_qr: qr_unique_id (UUID collision —
-        // vanishingly rare) and digits (sequence collision — should never
-        // happen). Never fires for referral_code (no UNIQUE constraint
-        // there, by design).
+        const c = err.constraint || '';
+        if (c === 'manual_qr_digits_unique') {
+          return res.status(409).json({
+            error: 'Digits sequence out of sync with existing data. The next mint will auto-resync — please retry.',
+          });
+        }
+        if (c === 'manual_qr_qr_unique_id_key' || c.includes('unique_id')) {
+          return res.status(409).json({
+            error: 'Rare UUID collision — retry the mint (a new UUID will be generated).',
+          });
+        }
         return res.status(409).json({
-          error:
-            'Rare UUID or digits sequence collision. Retry the mint — a new UUID will be generated.',
+          error: `Uniqueness violation on ${c || 'unknown constraint'}. Please retry.`,
         });
       }
       return res.status(500).json({ error: err.message });
