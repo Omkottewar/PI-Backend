@@ -50,6 +50,41 @@ export async function createQrRecord({
     razorpay_order_id === 'manual' &&
     razorpay_payment_id === 'manual' &&
     razorpay_signature === 'manual';
+
+  // Idempotency check — if this exact razorpay_order_id was already
+  // used to successfully create a QR, return that QR instead of trying
+  // again. This handles the "response lost in transit" scenario where
+  // the backend committed the QR but the network dropped before the
+  // client saw the response — the client retries, we recognize the
+  // order, and hand back the existing QR. Prevents:
+  //   - Duplicate 400s from the vehicle-number UNIQUE constraint
+  //   - Double-charge fear ("did my payment go through?")
+  //   - Manual refunds for what were actually successful transactions
+  if (!isManualBypass && razorpay_order_id) {
+    try {
+      const idem = await pool.query(
+        `SELECT q.*
+           FROM payments p
+           JOIN qrdata q ON q.id = p.qr_id
+          WHERE p.razorpay_order_id = $1
+            AND p.status = 'verified'
+            AND p.user_id = $2
+          LIMIT 1`,
+        [razorpay_order_id, userId]
+      );
+      if (idem.rows.length) {
+        const existing = idem.rows[0];
+        const alertUrl = `${config.publicAppUrl}/alert/${existing.unique_id}?digits=${existing.digits}`;
+        console.log(`[qr/create] idempotent hit for order=${razorpay_order_id} → qr_id=${existing.id}`);
+        return { ...existing, alertUrl };
+      }
+    } catch (err) {
+      // Idempotency check is best-effort — if it fails (e.g., payments
+      // table doesn't exist yet), fall through to the normal path.
+      console.warn('[qr/create] idempotency check skipped:', err.message);
+    }
+  }
+
   if (!isManualBypass) {
     if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
       // Record the failed attempt for reconciliation, then reject.

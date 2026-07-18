@@ -228,6 +228,37 @@ router.post(
     }
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
+    // Idempotency — if this order was already used to renew this QR
+    // (either because a prior response was lost or because Razorpay
+    // retried its own callback), return the current QR state instead
+    // of running the UPDATE again.
+    try {
+      const idem = await pool.query(
+        `SELECT q.id, q.vehicle_number, q.is_active, q.date_of_activation
+           FROM payments p
+           JOIN qrdata q ON q.id = p.qr_id
+          WHERE p.razorpay_order_id = $1
+            AND p.status = 'verified'
+            AND p.user_id = $2
+            AND p.qr_id = $3
+          LIMIT 1`,
+        [razorpay_order_id, req.userId, qrId]
+      );
+      if (idem.rows.length) {
+        const row = idem.rows[0];
+        console.log(`[qr/renew/verify] idempotent hit for order=${razorpay_order_id}`);
+        return res.json({
+          ok: true,
+          qr_id: row.id,
+          vehicle_number: row.vehicle_number,
+          is_active: row.is_active,
+          date_of_activation: row.date_of_activation,
+        });
+      }
+    } catch (err) {
+      console.warn('[qr/renew/verify] idempotency check skipped:', err.message);
+    }
+
     if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
       markPaymentFailed({
         razorpayOrderId: razorpay_order_id,
