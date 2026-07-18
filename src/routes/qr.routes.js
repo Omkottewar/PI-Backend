@@ -56,14 +56,19 @@ router.post(
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.warn(`[qr/create] REJECTED — validation user=${req.userId} errors=${JSON.stringify(errors.array())}`);
       return res.status(400).json({ errors: errors.array() });
     }
+    const orderId = req.body?.razorpay_order_id;
+    const vehicle = req.body?.vehicle_number;
+    console.log(`[qr/create] entered user=${req.userId} order=${orderId} vehicle=${vehicle}`);
     try {
       const row = await createQrRecord({
         userId: req.userId,
         ...req.body,
         isManual: false,
       });
+      console.log(`[qr/create] OK user=${req.userId} order=${orderId} qr_id=${row.id} vehicle=${row.vehicle_number}`);
       return res.status(201).json({
         id: row.id,
         unique_id: row.unique_id,
@@ -74,6 +79,7 @@ router.post(
       });
     } catch (e) {
       const code = e.statusCode || 500;
+      console.error(`[qr/create] FAILED user=${req.userId} order=${orderId} vehicle=${vehicle} status=${code} err=${e.message}`);
       return res.status(code).json({ error: e.message });
     }
   }
@@ -168,6 +174,7 @@ router.put(
 // config.renewal.amountPaise so a promotional rate is one env-var away.
 router.post('/:id/renew/order', requireAuth, async (req, res) => {
   const qrId = parseInt(req.params.id, 10);
+  console.log(`[qr/renew/order] user=${req.userId} qr_id=${qrId}`);
   if (!Number.isFinite(qrId)) {
     return res.status(400).json({ error: 'Invalid QR id' });
   }
@@ -176,7 +183,10 @@ router.post('/:id/renew/order', requireAuth, async (req, res) => {
       `SELECT id, vehicle_number FROM qrdata WHERE id = $1 AND user_id = $2`,
       [qrId, req.userId]
     );
-    if (!own.rows.length) return res.status(404).json({ error: 'QR not found' });
+    if (!own.rows.length) {
+      console.warn(`[qr/renew/order] REJECTED — qr not found or not owned user=${req.userId} qr_id=${qrId}`);
+      return res.status(404).json({ error: 'QR not found' });
+    }
 
     const amount = config.renewal.amountPaise;
     const order = await createOrder(amount, `renew_${qrId}_${Date.now()}`);
@@ -190,6 +200,7 @@ router.post('/:id/renew/order', requireAuth, async (req, res) => {
       intendedAmountPaise: order.intended_amount ?? order.amount,
       currency: order.currency || 'INR',
     });
+    console.log(`[qr/renew/order] OK user=${req.userId} qr_id=${qrId} order=${order.id} amount=${order.amount}`);
     return res.json({
       order_id: order.id,
       amount: order.amount,                    // what Razorpay will charge
@@ -201,7 +212,7 @@ router.post('/:id/renew/order', requireAuth, async (req, res) => {
     });
   } catch (err) {
     const code = err.statusCode || 500;
-    console.error('[qr/renew/order] error:', err);
+    console.error(`[qr/renew/order] FAILED user=${req.userId} qr_id=${qrId} status=${code} err=${err.message}`);
     return res.status(code).json({ error: err.message });
   }
 });

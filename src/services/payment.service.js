@@ -128,6 +128,51 @@ export async function markPaymentFailed({
   }
 }
 
+// Records a client-side Razorpay event (success/failure/dismiss/wallet)
+// so we get server-side visibility into failures that never make it to
+// /qr/create. When the SDK fires an error on the user's device (declined
+// card, network drop mid-checkout, modal dismissed) the backend never
+// hears about it unless the client reports — this is that report.
+//
+// We ALSO mirror the outcome onto the payments row so the admin panel's
+// orphaned-payments view shows client-observed failures next to
+// server-observed ones.
+export async function trackClientEvent({
+  userId,
+  razorpayOrderId,
+  event,          // 'success' | 'failure' | 'dismiss' | 'external_wallet'
+  code,           // Razorpay error code, if any
+  description,    // Razorpay description or reason
+  source,         // 'qr_create' | 'qr_renew' — helps disambiguate
+  raw,            // free-form JSON blob from the SDK
+}) {
+  const tag = event === 'success' ? '[razorpay/client-event]' : '[razorpay/client-fail]';
+  const level = event === 'success' ? 'log' : 'error';
+  // One structured line — searchable with `[razorpay/client-` in Render logs.
+  console[level](
+    `${tag} user=${userId} order=${razorpayOrderId || '(none)'} event=${event} ` +
+    `code=${code || '-'} desc=${(description || '').replace(/\s+/g, ' ')} ` +
+    `source=${source || '-'} raw=${JSON.stringify(raw || {}).slice(0, 500)}`
+  );
+  // Best-effort persistence so the audit trail carries the failure
+  // reason even if server-side logs get rotated out. Only marks
+  // 'failure' events; success is redundant with markPaymentVerified.
+  if (event === 'failure' && razorpayOrderId) {
+    try {
+      await ensurePaymentsTable();
+      await pool.query(
+        `UPDATE payments
+            SET status        = CASE WHEN status = 'verified' THEN status ELSE 'failed' END,
+                error_message = COALESCE(error_message, $2)
+          WHERE razorpay_order_id = $1`,
+        [razorpayOrderId, `client_${code || 'unknown'}: ${description || ''}`.trim().slice(0, 500)]
+      );
+    } catch (err) {
+      console.error('[payments] trackClientEvent update failed:', err.message);
+    }
+  }
+}
+
 // Reconciliation helper — a payment is "orphaned" when it's been sitting
 // in `created` status too long (>10 min). Either Razorpay never charged
 // it (user closed the modal), or Razorpay charged but our /qr/create

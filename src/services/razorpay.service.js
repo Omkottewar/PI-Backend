@@ -65,6 +65,13 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
     err.statusCode = 503;
     throw err;
   }
+  // Structured entry log so every order creation is traceable in Render
+  // logs — search for `[razorpay/order]` to see the full lifecycle of
+  // any payment. `requested` and `amt` may differ when the test-charge
+  // override is active; both are logged for reconciliation.
+  console.log(
+    `[razorpay/order] creating amount=${amt} (intended=${requested}) receipt=${receipt} live=${String(config.razorpayKeyId || '').startsWith('rzp_live_')}`
+  );
   try {
     const order = await rz.orders.create({
       amount: amt,
@@ -72,11 +79,32 @@ export async function createOrder(amountPaise = DEFAULT_AMOUNT_PAISE, receipt = 
       receipt,
       payment_capture: 1,
     });
+    console.log(
+      `[razorpay/order] created order_id=${order.id} amount=${order.amount} status=${order.status || 'unknown'}`
+    );
     // Attach intended_amount so callers can show the real price on the
     // UI while Razorpay itself will charge order.amount (which equals
     // the test override when active).
     return { ...order, intended_amount: requested };
   } catch (err) {
+    // Log the RAW Razorpay error before wrapping so we can see exactly
+    // what the gateway said. Without this, our wrapped 502 hides the
+    // real reason (bad key, wrong signature format, invalid currency,
+    // account restrictions, etc.).
+    console.error(
+      '[razorpay/order] SDK call failed',
+      JSON.stringify({
+        upstream_status: err.statusCode || err.error?.status_code,
+        code: err.error?.code,
+        description: err.error?.description,
+        reason: err.error?.reason,
+        source: err.error?.source,
+        step: err.error?.step,
+        field: err.error?.field,
+        raw_message: err.message,
+      })
+    );
+
     // Razorpay SDK exposes statusCode + error.description on API failures.
     // We map every upstream failure to 502 Bad Gateway — NEVER a 401 —
     // because a 401 back to the mobile client would trigger the
@@ -118,15 +146,32 @@ export function verifyPaymentSignature(orderId, paymentId, signature) {
     process.env.ALLOW_FAKE_PAYMENT === 'true' &&
     config.nodeEnv === 'development'
   ) {
+    console.log(`[razorpay/verify] dev-mode fake payment accepted order=${orderId}`);
     return true;
   }
-  if (!config.razorpayKeySecret) return false;
-  if (!orderId || !paymentId || !signature) return false;
+  if (!config.razorpayKeySecret) {
+    console.error(`[razorpay/verify] REJECTED — RAZORPAY_KEY_SECRET not configured order=${orderId}`);
+    return false;
+  }
+  if (!orderId || !paymentId || !signature) {
+    console.warn(`[razorpay/verify] REJECTED — missing field order=${orderId} payment=${paymentId} sig_present=${!!signature}`);
+    return false;
+  }
   // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET) — Razorpay spec.
   const body = `${orderId}|${paymentId}`;
   const expected = crypto
     .createHmac('sha256', config.razorpayKeySecret)
     .update(body)
     .digest('hex');
-  return safeEqualHex(expected, signature);
+  const ok = safeEqualHex(expected, signature);
+  if (ok) {
+    console.log(`[razorpay/verify] OK order=${orderId} payment=${paymentId}`);
+  } else {
+    console.error(
+      `[razorpay/verify] SIGNATURE MISMATCH order=${orderId} payment=${paymentId} ` +
+      `expected_prefix=${expected.slice(0, 12)}... got_prefix=${String(signature).slice(0, 12)}... ` +
+      `— usually means the KEY_SECRET on this server doesn't match the one that created the order`
+    );
+  }
+  return ok;
 }
