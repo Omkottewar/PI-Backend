@@ -17,8 +17,12 @@ function getClient() {
   return client;
 }
 
-/** Amount in paise — ₹353 as in mock */
-export const DEFAULT_AMOUNT_PAISE = 35300;
+/** First-year subscription amount — ₹299 in paise. Must match the
+ *  marketing copy on the home/subscription card and the Payment screen,
+ *  or users will see three different prices across the checkout and
+ *  abandon (real production incident, July 2026).
+ *  Renewals use config.renewal.amountPaise (₹99) via /qr/:id/renew/order. */
+export const DEFAULT_AMOUNT_PAISE = 29900;
 /** Razorpay's own minimum. Sending less returns 400 BAD_REQUEST_ERROR. */
 export const MIN_AMOUNT_PAISE = 100;
 

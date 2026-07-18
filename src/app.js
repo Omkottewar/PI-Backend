@@ -11,6 +11,7 @@ import appRoutes from './routes/app.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import exotelRoutes from './routes/exotel.routes.js';
 import exotelCallbackRoutes from './routes/exotelCallback.routes.js';
+import razorpayWebhookRoutes from './routes/razorpayWebhook.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 
 const app = express();
@@ -101,6 +102,10 @@ app.use('/api/app', appRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/exotel', exotelRoutes);
 app.use('/api/exotel', exotelCallbackRoutes);
+// Razorpay webhook — mounted OUTSIDE any auth middleware because
+// Razorpay hits it directly with HMAC-signed payloads. The route
+// verifies the signature itself.
+app.use('/api/razorpay', razorpayWebhookRoutes);
 app.use('/api/admin', adminRoutes);
 
 

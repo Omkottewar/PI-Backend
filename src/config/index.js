@@ -11,6 +11,12 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
+  // Secret configured in Razorpay Dashboard → Settings → Webhooks. Used
+  // to verify the X-Razorpay-Signature header on incoming webhook POSTs
+  // so a third party can't forge payment.captured events. If unset, the
+  // webhook endpoint accepts nothing — safer default than accepting
+  // unsigned events.
+  razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
   publicAppUrl: (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
   // Temporary static OTP accepted alongside real per-mobile OTPs so the
   // team can log in while an SMS provider is still being picked. When
