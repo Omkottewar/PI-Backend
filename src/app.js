@@ -26,6 +26,15 @@ app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 
 app.use(cors());
+
+// Razorpay's webhook body must be HMAC-verified against the EXACT bytes
+// Razorpay signed. If express.json() runs first it consumes the stream
+// and populates req.body as a parsed object, so signature verification
+// gets an empty rawBody, the response hangs, and Razorpay retries. Mount
+// a path-scoped express.raw() BEFORE the global JSON parser so
+// req.body is a Buffer containing the exact signed bytes.
+app.use('/api/razorpay/webhook', express.raw({ type: '*/*', limit: '1mb' }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

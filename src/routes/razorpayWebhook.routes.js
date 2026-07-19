@@ -44,42 +44,36 @@ function verifyWebhookSignature(rawBody, signatureHeader) {
   }
 }
 
-// Express by default parses JSON and strips the raw body. Razorpay
-// needs the EXACT bytes we received to sign against — so we mount this
-// route with a raw-body parser and only after that parse ourselves.
+// app.js mounts express.raw() on this path BEFORE express.json(), so
+// req.body arrives as a Buffer with the exact bytes Razorpay signed.
+// We HMAC over those bytes, then JSON.parse for the payload.
 router.post(
   '/webhook',
-  (req, res, next) => {
-    // Collect the raw body ourselves so we can HMAC over the exact
-    // bytes Razorpay signed. Skip if body-parser already consumed it.
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => { data += chunk; });
-    req.on('end', () => {
-      req.rawBody = data;
-      try {
-        req.body = data ? JSON.parse(data) : {};
-      } catch (_) {
-        req.body = {};
-      }
-      next();
-    });
-    req.on('error', () => next());
-  },
   async (req, res) => {
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString('utf8')
+      : (typeof req.body === 'string' ? req.body : '');
     const sig = req.headers['x-razorpay-signature'];
-    const ok = verifyWebhookSignature(req.rawBody || '', sig);
+    const ok = verifyWebhookSignature(rawBody, sig);
     if (!ok) {
       console.warn(`[razorpay/webhook] REJECTED — bad or missing signature ip=${req.ip}`);
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
-    const event = req.body?.event || 'unknown';
+    let payload;
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch (err) {
+      console.warn('[razorpay/webhook] REJECTED — malformed JSON:', err.message);
+      return res.status(400).json({ error: 'Malformed JSON' });
+    }
+
+    const event = payload?.event || 'unknown';
     // Razorpay's payload nests the actual object under a container:
     //   payload.payment.entity      for payment.* events
     //   payload.order.entity        for order.* events
-    const payment = req.body?.payload?.payment?.entity || null;
-    const order = req.body?.payload?.order?.entity || payment ? payment : null;
+    const payment = payload?.payload?.payment?.entity || null;
+    const order = payload?.payload?.order?.entity || null;
 
     const orderId = payment?.order_id || order?.id || null;
     const paymentId = payment?.id || null;
