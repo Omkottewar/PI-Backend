@@ -17,12 +17,15 @@ function getClient() {
   return client;
 }
 
-/** First-year subscription amount — ₹299 in paise. Must match the
- *  marketing copy on the home/subscription card and the Payment screen,
- *  or users will see three different prices across the checkout and
- *  abandon (real production incident, July 2026).
- *  Renewals use config.renewal.amountPaise (₹99) via /qr/:id/renew/order. */
-export const DEFAULT_AMOUNT_PAISE = 29900;
+/** One-time subscription amount — ₹549 total in paise.
+ *   Breakdown: platform fee ₹499 + shipping ₹50 = ₹549.
+ *  This must equal (config.pricing.platformFeePaise + shippingFeePaise)
+ *  and match the marketing copy on the home/subscription card and the
+ *  Payment screen — any mismatch causes users to see different prices
+ *  during checkout and abandon (real production incident, July 2026).
+ *  There is no annual renewal — this is a one-time purchase for the
+ *  lifetime of the customer's account. */
+export const DEFAULT_AMOUNT_PAISE = 54900;
 /** Razorpay's own minimum. Sending less returns 400 BAD_REQUEST_ERROR. */
 export const MIN_AMOUNT_PAISE = 100;
 

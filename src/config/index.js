@@ -51,9 +51,19 @@ export const config = {
   },
   // Renewal pricing. Kept separate from the first-year price (in
   // DEFAULT_AMOUNT_PAISE) so promotional or campaign renewal rates don't
-  // affect new-QR purchases. ₹99 default per the T&C.
+  // affect new-QR purchases. Renewal is currently NOT surfaced to
+  // customers — the product is a one-time purchase — but the config
+  // and endpoints remain in case that changes.
   renewal: {
     amountPaise: parseInt(process.env.RENEWAL_AMOUNT_PAISE || '9900', 10),
+  },
+  // Line-item breakdown for the invoice email + payment screen. Sum
+  // must equal DEFAULT_AMOUNT_PAISE (₹549). Split from the total so
+  // the invoice shows Platform + Shipping as distinct line items —
+  // matches how the price is advertised on the marketing page.
+  pricing: {
+    platformFeePaise: parseInt(process.env.PLATFORM_FEE_PAISE || '49900', 10),
+    shippingFeePaise: parseInt(process.env.SHIPPING_FEE_PAISE || '5000', 10),
   },
   // Live-mode smoke test override. When set to a positive integer (in
   // paise), every Razorpay order is created with THIS amount instead

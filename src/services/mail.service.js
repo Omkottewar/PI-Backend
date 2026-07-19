@@ -33,7 +33,17 @@ function invoiceNumber(qr) {
 
 function buildInvoiceHtml(qr, family) {
   const inv = config.invoice;
-  const priceText = fmtCurrency(inv.amount, inv.currency);
+  // Line-item breakdown so the invoice shows Platform + Shipping
+  // distinctly. Falls back to the legacy single-amount view if the
+  // pricing config is missing for any reason (e.g., older deploy).
+  const platformPaise = config.pricing?.platformFeePaise ?? 0;
+  const shippingPaise = config.pricing?.shippingFeePaise ?? 0;
+  const totalPaise = platformPaise + shippingPaise;
+  const platformText = fmtCurrency(Math.round(platformPaise / 100), inv.currency);
+  const shippingText = fmtCurrency(Math.round(shippingPaise / 100), inv.currency);
+  const totalText = totalPaise > 0
+    ? fmtCurrency(Math.round(totalPaise / 100), inv.currency)
+    : fmtCurrency(inv.amount, inv.currency);
   const activatedOn = new Date(qr.date_of_activation || qr.created_at || Date.now());
   const activationText = activatedOn.toLocaleDateString('en-IN', {
     year: 'numeric', month: 'long', day: 'numeric',
@@ -81,12 +91,27 @@ function buildInvoiceHtml(qr, family) {
             </tr>
             <tr>
               <td style="padding:8px 0;color:#666;">Plan</td>
-              <td style="padding:8px 0;text-align:right;">QR 4 Emergency Annual (1 year)</td>
+              <td style="padding:8px 0;text-align:right;">QR 4 Emergency (One-time purchase, no renewal)</td>
+            </tr>
+            ${totalPaise > 0 ? `
+            <tr>
+              <td style="padding:8px 0;color:#666;">Platform fee</td>
+              <td style="padding:8px 0;text-align:right;">${escapeHtml(platformText)}</td>
             </tr>
             <tr>
-              <td style="padding:8px 0;color:#666;">Amount</td>
-              <td style="padding:8px 0;text-align:right;font-weight:800;font-size:16px;">${escapeHtml(priceText)}</td>
+              <td style="padding:8px 0;color:#666;">Shipping</td>
+              <td style="padding:8px 0;text-align:right;">${escapeHtml(shippingText)}</td>
             </tr>
+            <tr>
+              <td style="padding:8px 0;color:#666;border-top:1px solid #eee;">Total paid</td>
+              <td style="padding:8px 0;text-align:right;font-weight:800;font-size:16px;border-top:1px solid #eee;">${escapeHtml(totalText)}</td>
+            </tr>
+            ` : `
+            <tr>
+              <td style="padding:8px 0;color:#666;">Amount</td>
+              <td style="padding:8px 0;text-align:right;font-weight:800;font-size:16px;">${escapeHtml(totalText)}</td>
+            </tr>
+            `}
           </table>
 
           ${familyRows
