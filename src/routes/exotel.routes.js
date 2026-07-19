@@ -112,27 +112,35 @@ router.get('/lookup', async (req, res) => {
     const row = result.rows[0];
     const family = Array.isArray(row.family_contacts) ? row.family_contacts : [];
 
-    // Build the ringing list: FAMILY CONTACTS ONLY. The owner's mobile
-    // is intentionally excluded — the QR owner is often the person in
-    // the emergency (the driver in the crashed vehicle), so ringing
-    // their phone is pointless. Only their nominated emergency contacts
-    // should be dialed.
+    // Build the ringing list based on what the bystander tapped on the
+    // alert page. Selection is authoritative — we honor it literally so
+    // the caller reaches the person they picked, not someone else.
     //
-    // Order matters for parallel ringing UX:
-    //   - If the bystander explicitly tapped a family member on the
-    //     alert page, that contact is dialed first.
-    //   - The remaining family contacts follow in id order.
+    //   kind = 'owner'  → dial the OWNER only. If the owner doesn't pick
+    //                     up, the call ends; the bystander can go back
+    //                     and tap a family member instead. We deliberately
+    //                     do NOT fan out to family here — the owner tap
+    //                     is often a "reach the owner specifically" ask
+    //                     (wrong parking, benign scan) and pulling family
+    //                     in parallel would let a family member pick up
+    //                     instead of the owner, which is the exact bug.
+    //   kind = 'family' → dial the selected family contact first, then
+    //                     the remaining family contacts in parallel as
+    //                     fallback (id order). Owner is NOT included.
     const numbers = [];
     const push = (raw) => {
       const e = normalizeIndianMobile(raw);
       if (e && !numbers.includes(e)) numbers.push(e);
     };
 
-    // primaryTargetRaw = the number we stamp onto caller_activity and
-    // the pending call_logs row. Represents "who the caller was trying
-    // to reach" for owner-side attribution.
+    // primaryTargetRaw = the number stamped onto caller_activity and the
+    // pending call_logs row. Represents "who the caller was trying to
+    // reach" for owner-side attribution.
     let primaryTargetRaw;
-    if (row.selected_contact_kind === 'family' && row.selected_family_id != null) {
+    if (row.selected_contact_kind === 'owner') {
+      primaryTargetRaw = row.owner_mobile;
+      push(primaryTargetRaw);
+    } else if (row.selected_contact_kind === 'family' && row.selected_family_id != null) {
       const selected = family.find((f) => f.id === row.selected_family_id);
       if (selected && selected.phone) {
         primaryTargetRaw = selected.phone;
@@ -142,16 +150,10 @@ router.get('/lookup', async (req, res) => {
       for (const f of family) {
         if (f.id !== row.selected_family_id) push(f.phone);
       }
-    } else {
-      // Owner selected or no selection — just ring the full family list
-      // in id order. The owner's own mobile is NOT included.
+    } else if (row.selected_contact_kind === 'family') {
+      // family selected but no specific id (defensive fallback) — ring all.
       for (const f of family) push(f.phone);
-    }
-    // Fall back to the first family contact if no primary target was set
-    // (e.g., owner selected — we don't dial the owner but we still need
-    // something on caller_activity.to_number).
-    if (!primaryTargetRaw && family.length > 0) {
-      primaryTargetRaw = family[0].phone;
+      if (family.length > 0) primaryTargetRaw = family[0].phone;
     }
     const toE164 = normalizeIndianMobile(primaryTargetRaw);
 
