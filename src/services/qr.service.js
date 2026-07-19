@@ -85,7 +85,42 @@ export async function createQrRecord({
     }
   }
 
-  if (!isManualBypass) {
+  // Second idempotency layer: the Razorpay webhook may have already
+  // HMAC-verified this payment (event=payment.captured) but the client-
+  // side Razorpay SDK reported failure/timeout to the phone (very common
+  // for UPI Collect when NPCI is slow). In that case:
+  //   - payments.status is 'verified' with a razorpay_payment_id
+  //   - payments.qr_id is NULL because the QR was never created client-side
+  //   - the client can't pass a razorpay_signature because it never got one
+  // Trust the webhook (it's HMAC'd with our shared secret, only Razorpay
+  // could have produced it) and continue QR creation without re-checking
+  // the client-provided signature. Pull the payment_id from the DB row.
+  let effectivePaymentId = razorpay_payment_id;
+  let webhookTrusted = false;
+  if (!isManualBypass && razorpay_order_id) {
+    try {
+      const wh = await pool.query(
+        `SELECT razorpay_payment_id
+           FROM payments
+          WHERE razorpay_order_id = $1
+            AND user_id = $2
+            AND status = 'verified'
+          LIMIT 1`,
+        [razorpay_order_id, userId]
+      );
+      if (wh.rows.length && wh.rows[0].razorpay_payment_id) {
+        webhookTrusted = true;
+        effectivePaymentId = wh.rows[0].razorpay_payment_id;
+        console.log(
+          `[qr/create] trusting webhook-verified payment order=${razorpay_order_id} payment=${effectivePaymentId} — skipping client signature check`
+        );
+      }
+    } catch (err) {
+      console.warn('[qr/create] webhook-trust lookup skipped:', err.message);
+    }
+  }
+
+  if (!isManualBypass && !webhookTrusted) {
     if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
       // Record the failed attempt for reconciliation, then reject.
       markPaymentFailed({
@@ -202,7 +237,7 @@ export async function createQrRecord({
     if (!isManualBypass) {
       markPaymentVerified({
         razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
+        razorpayPaymentId: effectivePaymentId,
         razorpaySignature: razorpay_signature,
         qrId: qr.id,
       });

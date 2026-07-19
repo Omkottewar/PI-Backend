@@ -146,18 +146,45 @@ export async function trackClientEvent({
   source,         // 'qr_create' | 'qr_renew' — helps disambiguate
   raw,            // free-form JSON blob from the SDK
 }) {
-  const tag = event === 'success' ? '[razorpay/client-event]' : '[razorpay/client-fail]';
+  // "Money taken but QR not created" is the highest-severity payment
+  // failure we can see — log it with a [CRITICAL] marker so it's easy
+  // to alert on and easy to spot when triaging incidents. Handler
+  // crashes go in this bucket too: they mean a Razorpay event fired
+  // but our own code blew up before completing the flow.
+  const criticalEvents = new Set([
+    'qr_creation_failed_after_payment',
+    'qr_creation_stuck',
+    'success_handler_crashed',
+    'error_handler_crashed',
+    'checkout_open_failed',
+  ]);
+  const isCritical = criticalEvents.has(event);
+  const tag = isCritical
+    ? '[razorpay/client-fail] [CRITICAL]'
+    : event === 'success'
+      ? '[razorpay/client-event]'
+      : '[razorpay/client-fail]';
   const level = event === 'success' ? 'log' : 'error';
-  // One structured line — searchable with `[razorpay/client-` in Render logs.
+  // One structured line — searchable with `[razorpay/client-` in Render
+  // logs, or `[CRITICAL]` for the payment-taken-but-QR-not-created case.
   console[level](
     `${tag} user=${userId} order=${razorpayOrderId || '(none)'} event=${event} ` +
     `code=${code || '-'} desc=${(description || '').replace(/\s+/g, ' ')} ` +
     `source=${source || '-'} raw=${JSON.stringify(raw || {}).slice(0, 500)}`
   );
   // Best-effort persistence so the audit trail carries the failure
-  // reason even if server-side logs get rotated out. Only marks
-  // 'failure' events; success is redundant with markPaymentVerified.
-  if (event === 'failure' && razorpayOrderId) {
+  // reason even if server-side logs get rotated out. The verified-status
+  // guard means we never overwrite a webhook-confirmed payment; we only
+  // add an error_message note.
+  const persistFailures = new Set([
+    'failure',
+    'qr_creation_failed_after_payment',
+    'qr_creation_stuck',
+    'success_handler_crashed',
+    'error_handler_crashed',
+    'checkout_open_failed',
+  ]);
+  if (persistFailures.has(event) && razorpayOrderId) {
     try {
       await ensurePaymentsTable();
       await pool.query(
@@ -165,7 +192,7 @@ export async function trackClientEvent({
             SET status        = CASE WHEN status = 'verified' THEN status ELSE 'failed' END,
                 error_message = COALESCE(error_message, $2)
           WHERE razorpay_order_id = $1`,
-        [razorpayOrderId, `client_${code || 'unknown'}: ${description || ''}`.trim().slice(0, 500)]
+        [razorpayOrderId, `client_${event}_${code || 'unknown'}: ${description || ''}`.trim().slice(0, 500)]
       );
     } catch (err) {
       console.error('[payments] trackClientEvent update failed:', err.message);

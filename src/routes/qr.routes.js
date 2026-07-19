@@ -34,8 +34,12 @@ router.post(
   '/create',
   requireAuth,
   body('razorpay_order_id').notEmpty(),
-  body('razorpay_payment_id').notEmpty(),
-  body('razorpay_signature').notEmpty(),
+  // payment_id and signature may be empty when the mobile client is
+  // recovering from a Razorpay client-side timeout that our webhook has
+  // already confirmed server-side. createQrRecord() checks payments.status
+  // and pulls the payment_id from the DB in that path.
+  body('razorpay_payment_id').isString(),
+  body('razorpay_signature').isString(),
   body('name').trim().notEmpty(),
   body('mobile').trim().isLength({ min: 10, max: 15 }),
   // gmail_remove_dots: false — see profile.routes.js for the reason.

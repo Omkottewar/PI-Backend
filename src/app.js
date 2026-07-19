@@ -88,9 +88,16 @@ app.use((req, res, next) => {
   const { method, originalUrl } = req;
   const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
   let bodyPreview = '';
-  if (hasBody && req.body && Object.keys(req.body).length) {
+  if (hasBody && req.body) {
     try {
-      bodyPreview = ' body=' + JSON.stringify(redact(req.body)).slice(0, 500);
+      // Buffer bodies (e.g. the Razorpay webhook where we use express.raw)
+      // JSON-serialise to `{"0":123,"1":34,...}` which is unreadable.
+      // Decode as UTF-8 for logging instead — the payload is JSON.
+      if (Buffer.isBuffer(req.body)) {
+        bodyPreview = ' body=' + req.body.toString('utf8').slice(0, 500);
+      } else if (Object.keys(req.body).length) {
+        bodyPreview = ' body=' + JSON.stringify(redact(req.body)).slice(0, 500);
+      }
     } catch { /* ignore */ }
   }
   console.log(`[req] ${method} ${originalUrl}${bodyPreview}`);
