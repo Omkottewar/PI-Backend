@@ -169,48 +169,26 @@
 
     <!-- Mint form -->
     <div class="card">
-      <h2>Mint New Manual QR <span style="font-size: 10px; color: var(--text3); font-weight: 500; letter-spacing: 0.4px;">v2 · referral field added</span></h2>
+      <h2>Mint New Manual QR</h2>
       <p class="muted" style="margin-top: -6px; margin-bottom: 14px;">
-        Creates a batch. Each row gets a fresh UUID, a 5-digit extension code
-        (auto-incremented from the manual sequence), and either an auto-generated
-        referral code or one from your custom list.
+        Enter how many stickers to mint and the referral code they should all
+        be linked to. Each sticker gets its own UUID + 5-digit extension code;
+        the referral code is shared across every sticker in this batch.
       </p>
       <div id="mint-err" class="err hidden"></div>
-      <div id="mint-success" class="success hidden"></div>
       <div class="grid2">
         <div>
           <label>How Many</label>
           <input type="number" id="mint-count" min="1" max="500" value="1" />
         </div>
         <div>
-          <label>Prefix (optional, for auto-generated codes)</label>
-          <input type="text" id="mint-prefix" placeholder="e.g., BATCH-2026-" maxlength="20" />
+          <label style="color: var(--primary);">Referral Code</label>
+          <input type="text" id="mint-code"
+                 placeholder="e.g., RAJ2026"
+                 maxlength="60" autocomplete="off"
+                 style="border-color: rgba(255,122,0,0.4);" />
         </div>
       </div>
-      <div style="height: 12px;"></div>
-
-      <!-- Single-QR case: one clear referral-code input -->
-      <div id="mint-single-wrap"
-           style="background: rgba(255,122,0,0.08); border: 1px solid rgba(255,122,0,0.4); border-radius: 12px; padding: 14px 14px 12px;">
-        <label style="color: var(--primary);">Referral Code</label>
-        <input type="text" id="mint-single-code"
-               placeholder="e.g., RAJ2026, NAIK-A17, or leave empty to auto-generate"
-               maxlength="60" autocomplete="off"
-               style="border-color: rgba(255,122,0,0.4); background: #0F1626;" />
-        <div class="muted" style="margin-top: 8px; font-size: 11.5px; line-height: 1.5;">
-          <strong style="color: var(--text);">Type the code here.</strong> The customer will enter this exact code when linking their sticker via the alert page. Leave empty to auto-generate an 8-character code like <code style="color: var(--primary);">A3F0B12C</code>.
-          <br>
-          <span style="color: var(--text3);">The same code can be reused across multiple mints — useful for shipping a whole batch under one campaign code.</span>
-        </div>
-      </div>
-
-      <!-- Batch case: multi-line textarea -->
-      <div id="mint-batch-wrap" class="hidden">
-        <label>Referral Codes (one per line — must match count)</label>
-        <textarea id="mint-custom" rows="4"
-                  placeholder="Leave empty for auto-generated codes, or enter one code per line"></textarea>
-      </div>
-
       <div style="height: 14px;"></div>
       <button class="primary" id="mint-btn">Mint QR</button>
     </div>
@@ -337,53 +315,26 @@
     } catch (e) { console.error(e); }
   }
 
-  // ─── Mint form: toggle single-input vs batch-textarea ──────────
-  // Show the single "Referral Code" input when count == 1, and the
-  // multi-line textarea when count > 1. Keeps the UI focused on the
-  // most common case (minting one QR at a time) without hiding the
-  // batch option.
-  function syncMintUi() {
-    const n = parseInt($('mint-count').value) || 1;
-    const isSingle = n === 1;
-    $('mint-single-wrap').classList.toggle('hidden', !isSingle);
-    $('mint-batch-wrap').classList.toggle('hidden', isSingle);
-    $('mint-btn').textContent = isSingle ? 'Mint QR' : `Mint ${n} QRs`;
-  }
-  $('mint-count').addEventListener('input', syncMintUi);
-  syncMintUi();
-
   // ─── Mint action ────────────────────────────────────────────────
   $('mint-btn').onclick = async () => {
     const count = parseInt($('mint-count').value);
-    const prefix = $('mint-prefix').value.trim();
+    const code = $('mint-code').value.trim();
     $('mint-err').classList.add('hidden');
-    $('mint-success').classList.add('hidden');
-    if (!count || count < 1) {
+    if (!count || count < 1 || count > 500) {
       $('mint-err').textContent = 'Enter a valid count (1-500)';
       $('mint-err').classList.remove('hidden');
       return;
     }
-    const body = { count };
-    if (prefix) body.prefix = prefix;
+    if (!code) {
+      $('mint-err').textContent = 'Enter a referral code — it links every sticker in this batch.';
+      $('mint-err').classList.remove('hidden');
+      return;
+    }
 
-    // Referral codes come from either the single input (count=1) or the
-    // textarea (count>1). Empty = auto-generate on the server.
-    let codes = [];
-    if (count === 1) {
-      const single = $('mint-single-code').value.trim();
-      if (single) codes = [single];
-    } else {
-      const raw = $('mint-custom').value.trim();
-      if (raw) codes = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    }
-    if (codes.length > 0) {
-      if (codes.length !== count) {
-        $('mint-err').textContent = `Referral codes provided (${codes.length}) must equal Count (${count})`;
-        $('mint-err').classList.remove('hidden');
-        return;
-      }
-      body.customCodes = codes;
-    }
+    // Same code for every sticker in the batch — backend allows duplicates
+    // within customCodes (see admin.routes.js comment on `Referral codes
+    // may be reused`), so we just repeat the single code N times.
+    const body = { count, customCodes: Array(count).fill(code) };
 
     $('mint-btn').disabled = true;
     $('mint-btn').textContent = 'Minting…';
@@ -398,17 +349,14 @@
       $('mint-result').value = lines.join('\n');
       $('mint-modal').classList.add('open');
       $('mint-count').value = 1;
-      $('mint-prefix').value = '';
-      $('mint-custom').value = '';
-      $('mint-single-code').value = '';
-      syncMintUi();
+      $('mint-code').value = '';
       loadStats();
     } catch (e) {
       $('mint-err').textContent = e.message;
       $('mint-err').classList.remove('hidden');
     } finally {
       $('mint-btn').disabled = false;
-      syncMintUi();
+      $('mint-btn').textContent = 'Mint QR';
     }
   };
 
