@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { randomBytes, randomUUID } from 'crypto';
+import JSZip from 'jszip';
 import { pool } from '../db/pool.js';
 import { config } from '../config/index.js';
 import { requireAdmin } from '../middleware/adminAuth.js';
+import { renderStickerPng } from '../utils/sticker.js';
 
 const router = Router();
 
@@ -76,15 +78,22 @@ router.post(
     // subsequent DB restore or manual data load could put us out of
     // sync again — cheaper to fix on every mint than to fail one.
     // No-op when sequence is already ahead.
+    //
+    // `digits::text` is required because the column type has drifted
+    // between VARCHAR and INTEGER across environments — without the
+    // explicit cast the regex `~` errors out on INTEGER columns with
+    // `operator does not exist: integer ~ unknown`, and the whole
+    // resync gets silently swallowed by the catch. See migration 023
+    // for the historical write-up.
     try {
       await pool.query(`
         SELECT setval('qrdata_digits_manual_seq',
                       GREATEST(
-                        (SELECT COALESCE(MAX(CAST(digits AS INT)), 0)
-                           FROM manual_qr WHERE digits ~ '^[0-9]+$'),
-                        (SELECT COALESCE(MAX(CAST(digits AS INT)), 0)
+                        (SELECT COALESCE(MAX(CAST(digits::text AS INT)), 0)
+                           FROM manual_qr WHERE digits::text ~ '^[0-9]+$'),
+                        (SELECT COALESCE(MAX(CAST(digits::text AS INT)), 0)
                            FROM qrdata
-                          WHERE is_manual = true AND digits ~ '^[0-9]+$'),
+                          WHERE is_manual = true AND digits::text ~ '^[0-9]+$'),
                         70000
                       ),
                       true)
@@ -150,6 +159,74 @@ router.post(
       return res.status(500).json({ error: err.message });
     } finally {
       client.release();
+    }
+  }
+);
+
+// ─── POST /api/admin/manual-qr/zip ──────────────────────────────────────
+// Bundle a list of just-minted (or looked-up) manual QRs into a
+// downloadable ZIP: one PNG per row (encoding alert_url), plus a
+// manifest.csv. Client posts the items straight back after a successful
+// /mint call — no server-side batch state, no DB re-lookup.
+//
+// Body: { items: [{ alert_url: string, digits: string|number,
+//                   referral_code: string }, ...] }
+//   Rejected if items missing / empty / >500 (matches mint cap).
+router.post(
+  '/manual-qr/zip',
+  requireAdmin,
+  body('items').isArray({ min: 1, max: 500 }),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const items = req.body.items;
+
+    // Only alphanumerics, dash, underscore in filenames — everything
+    // else (spaces, slashes, non-ASCII) gets collapsed to underscore so
+    // Windows/macOS/Linux extraction is universally safe.
+    const sanitize = (s) =>
+      String(s || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60) || 'code';
+
+    try {
+      const zip = new JSZip();
+      const csvLines = ['digits,referral_code,unique_id,alert_url'];
+
+      for (const it of items) {
+        if (!it || typeof it.alert_url !== 'string' || !it.alert_url) {
+          return res.status(400).json({ error: 'Each item needs alert_url' });
+        }
+        // Full sticker template (red header, medical crosses, extension
+        // pill, black footer) matching the mobile app's QrDetailCard —
+        // isManual=true skips the vehicle number line since these are
+        // pre-print stickers.
+        const png = await renderStickerPng({
+          alertUrl: it.alert_url,
+          digits: it.digits,
+          isManual: true,
+        });
+        const filename = `${sanitize(it.digits)}_${sanitize(it.referral_code)}.png`;
+        zip.file(filename, png);
+        csvLines.push(
+          [it.digits, it.referral_code, it.qr_unique_id || '', it.alert_url].join(',')
+        );
+      }
+
+      // Manifest so the printer has both the visual QRs and the raw
+      // metadata mapping.
+      zip.file('manifest.csv', csvLines.join('\n'));
+
+      const buf = await zip.generateAsync({ type: 'nodebuffer' });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="manual-qrs-${Date.now()}.zip"`
+      );
+      res.setHeader('Content-Length', buf.length);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[admin/zip] error:', err);
+      return res.status(500).json({ error: err.message });
     }
   }
 );

@@ -237,14 +237,13 @@
 
 <!-- Mint result modal -->
 <div class="modal-bg" id="mint-modal">
-  <div class="modal">
-    <h3>Batch Minted</h3>
-    <p class="muted">Copy or share this list with your sticker printer. Each row is one physical sticker.</p>
-    <textarea id="mint-result" rows="10" style="font-family: monospace; font-size: 11.5px;" readonly></textarea>
-    <div style="height: 12px; display: flex; gap: 8px; margin-top: 12px;">
-      <button class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('mint-result').value); this.textContent='Copied ✓';">Copy to Clipboard</button>
-      <button class="primary" onclick="document.getElementById('mint-modal').classList.remove('open'); load();" style="flex:1;">Done</button>
-    </div>
+  <div class="modal" style="text-align: center;">
+    <div style="width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: rgba(16,185,129,0.14); display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--green);">✓</div>
+    <h3 id="mint-modal-title">Batch Minted</h3>
+    <p class="muted" id="mint-modal-msg" style="margin-top: -4px;">
+      Your ZIP is being prepared — the browser will start downloading in a moment.
+    </p>
+    <button class="primary" id="mint-done-btn" style="width: 100%; margin-top: 16px;">Done</button>
   </div>
 </div>
 
@@ -339,25 +338,73 @@
     $('mint-btn').disabled = true;
     $('mint-btn').textContent = 'Minting…';
     try {
+      // 1. Mint the DB rows. Backend responds with { items: [...] }
+      //    including alert_url for each sticker.
       const res = await api('/api/admin/manual-qr/mint', {
         method: 'POST', body: JSON.stringify(body)
       });
-      const lines = ['digits,referral_code,unique_id,alert_url'];
-      for (const it of res.items) {
-        lines.push([it.digits, it.referral_code, it.qr_unique_id, it.alert_url].join(','));
-      }
-      $('mint-result').value = lines.join('\n');
+
+      // 2. Immediately open the modal in "preparing" state and kick
+      //    off the ZIP download. Modal shows progress; user doesn't
+      //    have to click anything else.
+      $('mint-modal-title').textContent = 'Batch Minted';
+      $('mint-modal-msg').textContent =
+        `Generating ${res.items.length} QR${res.items.length === 1 ? '' : 's'} — download will start automatically.`;
       $('mint-modal').classList.add('open');
       $('mint-count').value = 1;
       $('mint-code').value = '';
       loadStats();
+
+      // 3. POST items back to the ZIP endpoint. Server generates the
+      //    PNGs + manifest.csv and streams a ZIP blob back.
+      const zipRes = await fetch('/api/admin/manual-qr/zip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': adminKey,
+        },
+        body: JSON.stringify({ items: res.items }),
+      });
+      if (!zipRes.ok) {
+        const errData = await zipRes.json().catch(() => ({}));
+        throw new Error(errData.error || `ZIP failed (HTTP ${zipRes.status})`);
+      }
+
+      // 4. Trigger the browser download.
+      const blob = await zipRes.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `manual-qrs-${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      $('mint-modal-msg').textContent =
+        `Downloaded ${res.items.length} QR${res.items.length === 1 ? '' : 's'} — check your Downloads folder.`;
     } catch (e) {
-      $('mint-err').textContent = e.message;
-      $('mint-err').classList.remove('hidden');
+      // If the mint DB rows already committed but ZIP failed, tell the
+      // admin so they know the rows exist and can be redownloaded
+      // later via the list below (once we add a per-batch download).
+      if ($('mint-modal').classList.contains('open')) {
+        $('mint-modal-title').textContent = 'ZIP Failed';
+        $('mint-modal-msg').textContent =
+          `QRs were minted, but ZIP download failed: ${e.message}. Look them up in the list below.`;
+      } else {
+        $('mint-err').textContent = e.message;
+        $('mint-err').classList.remove('hidden');
+      }
     } finally {
       $('mint-btn').disabled = false;
       $('mint-btn').textContent = 'Mint QR';
     }
+  };
+
+  // Modal Done button — closes and refreshes list.
+  $('mint-done-btn').onclick = () => {
+    $('mint-modal').classList.remove('open');
+    load();
   };
 
   // ─── List + filters ─────────────────────────────────────────────

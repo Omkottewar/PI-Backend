@@ -22,10 +22,22 @@ async function run() {
   });
   await client.connect();
   try {
-    const files = fs
+    const filter = process.argv[2]; // optional: `npm run migrate -- 023`
+    let files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.sql'))
       .sort();
+    if (filter) {
+      // Prefix match so `023`, `023_drop_legacy_extension_number`, or the
+      // full filename all work. Errors out if nothing matches so a typo
+      // doesn't silently no-op.
+      const matches = files.filter((f) => f.startsWith(filter));
+      if (matches.length === 0) {
+        console.error(`No migration file starts with "${filter}"`);
+        process.exit(1);
+      }
+      files = matches;
+    }
     for (const file of files) {
       const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
       console.log('Running', file);
