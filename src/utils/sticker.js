@@ -12,9 +12,12 @@ const RED = '#E51E25';
 const INK = '#0F1115';
 const WHITE = '#FFFFFF';
 
-// Base coordinate space. sharp rasterises this at 3× for print-crisp
-// PNGs (~1200×1580 output).
-const W = 400;
+// Base coordinate space. Width is sized so "QR 4 EMERGENCY" at Arial
+// Black 42pt fits with breathing room on both sides (measured against
+// libvips's default sans metrics — at 400 the text was overflowing the
+// clipPath, at 460 there's ~15px padding either side). sharp rasterises
+// this at 3× for print-crisp PNGs.
+const W = 460;
 
 /**
  * Build the SVG for one sticker.
@@ -62,15 +65,19 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
   };
 
   // Extension pill — white box with red text and thin red border.
-  const PILL_W = 130;
+  const PILL_W = 140;
   const PILL_H = 42;
   const PILL_X = (W - PILL_W) / 2;
   const PILL_Y = ROW_Y + (ROW_H - PILL_H) / 2;
 
   // Bottom row horizontal layout: BE NAYAK ... cross ... pill ... cross ... BE NAYAK
-  const CROSS_SIZE = 30;
-  const leftCrossCx = PILL_X - 22;
-  const rightCrossCx = PILL_X + PILL_W + 22;
+  // Spacing budget (per side):
+  //   left edge (14) → BE NAYAK label (~80wide at 16pt) → 12px gap →
+  //   cross (28) → 8px gap → pill → 8px gap → cross → 12px gap → BE NAYAK
+  // Adds up cleanly at W=460.
+  const CROSS_SIZE = 28;
+  const leftCrossCx = PILL_X - 20;
+  const rightCrossCx = PILL_X + PILL_W + 20;
   const leftLabelX = 14;
   const rightLabelX = W - 14;
   const rowCy = ROW_Y + ROW_H / 2;
@@ -91,13 +98,13 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="${RED}"/>
     <text x="${W / 2}" y="58" text-anchor="middle"
           font-family="Arial Black, Arial, Helvetica, sans-serif"
-          font-weight="900" font-size="46" fill="${WHITE}"
+          font-weight="900" font-size="42" fill="${WHITE}"
           letter-spacing="-0.5">
       QR 4 EMERGENCY
     </text>
-    <text x="${W / 2}" y="88" text-anchor="middle"
+    <text x="${W / 2}" y="86" text-anchor="middle"
           font-family="Arial, Helvetica, sans-serif" font-weight="800"
-          font-size="18" fill="${WHITE}" letter-spacing="2.4">
+          font-size="16" fill="${WHITE}" letter-spacing="2.2">
       SCAN TO CALL OWNER
     </text>
 
@@ -144,7 +151,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <!-- ── Bottom row: BE NAYAK · cross · pill · cross · BE NAYAK ── -->
     <text x="${leftLabelX}" y="${rowCy + 5}" text-anchor="start"
           font-family="Arial Black, Arial, sans-serif" font-weight="900"
-          font-size="18" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
+          font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
     ${cross(leftCrossCx, rowCy, CROSS_SIZE)}
 
     <!-- White pill with red text + red border -->
@@ -159,7 +166,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     ${cross(rightCrossCx, rowCy, CROSS_SIZE)}
     <text x="${rightLabelX}" y="${rowCy + 5}" text-anchor="end"
           font-family="Arial Black, Arial, sans-serif" font-weight="900"
-          font-size="18" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
+          font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
 
     <!-- ── Red footer with two icon rows ───────────────────── -->
     <rect x="0" y="${FOOTER_TOP}" width="${W}" height="${FOOTER_H}" fill="${RED}"/>
@@ -177,43 +184,51 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
 // ── Footer helpers ────────────────────────────────────────────────
 
 // Row 1 groups: globe icon + website on the left half, mail icon +
-// email on the right half. All white on the red footer.
+// email on the right half. Right-aligning the email against W-16 (with
+// its icon just to the left) guarantees "support@qr4emergency.com" fits
+// even at font-size 12 without running off the sticker edge.
 function footerRow1(y) {
-  const leftIconX = 22;
-  const leftTextX = leftIconX + 22;
-  const rightHalfStart = W * 0.52;
-  const rightIconX = rightHalfStart;
-  const rightTextX = rightIconX + 22;
+  const leftIconX = 16;
+  const leftTextX = leftIconX + 20;
+  const emailText = 'support@qr4emergency.com';
+  // Approximate email string width at font-size 12 Arial ≈ 155.
+  // Icon (14) + 6 gap = 20 to the left of the text.
+  const rightTextRight = W - 16;
+  const rightIconX = rightTextRight - 155 - 20;
+  const rightTextX = rightIconX + 20;
   return `
     ${iconGlobe(leftIconX, y - 10, 14, WHITE)}
     <text x="${leftTextX}" y="${y + 2}" text-anchor="start"
           font-family="Arial, Helvetica, sans-serif" font-weight="700"
-          font-size="13" fill="${WHITE}">www.qr4emergency.com</text>
+          font-size="12" fill="${WHITE}">www.qr4emergency.com</text>
 
     ${iconMail(rightIconX, y - 10, 14, WHITE)}
     <text x="${rightTextX}" y="${y + 2}" text-anchor="start"
           font-family="Arial, Helvetica, sans-serif" font-weight="700"
-          font-size="13" fill="${WHITE}">support@qr4emergency.com</text>
+          font-size="12" fill="${WHITE}">${emailText}</text>
   `;
 }
 
 // Row 2: three feature badges with thin white dividers between them.
+// Each [icon + gap + label] block is centred on the column's cx using
+// an approximate label width — labels have very different widths
+// ("NO PARKING" is ~30% wider than "TRACKING") so a single fixed
+// offset like row 1's was pushing NO PARKING off the sticker edge.
 function footerRow2(y) {
   const cols = [
-    { cx: W * 0.18, icon: iconWarning, label: 'ACCIDENT' },
-    { cx: W * 0.50, icon: iconPin, label: 'TRACKING' },
-    { cx: W * 0.82, icon: iconParking, label: 'NO PARKING' },
+    { cx: W * 0.18, icon: iconWarning, label: 'ACCIDENT',   textW: 76 },
+    { cx: W * 0.50, icon: iconPin,     label: 'TRACKING',   textW: 74 },
+    { cx: W * 0.82, icon: iconParking, label: 'NO PARKING', textW: 100 },
   ];
   const dividers = [W * 0.34, W * 0.66];
+  const iconSize = 16;
+  const gap = 6;
 
   let out = '';
   for (const c of cols) {
-    // Icon on the left, label on the right, both centred on cx.
-    const iconSize = 16;
-    // Approximate label width to place icon + label symmetrically:
-    // just offset by fixed amounts, tuned against the reference image.
-    const iconX = c.cx - 46;
-    const textX = c.cx - 26;
+    const totalW = iconSize + gap + c.textW;
+    const iconX = c.cx - totalW / 2;
+    const textX = iconX + iconSize + gap;
     out += `
       ${c.icon(iconX, y - 12, iconSize, WHITE)}
       <text x="${textX}" y="${y + 2}" text-anchor="start"
