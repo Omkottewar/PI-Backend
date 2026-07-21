@@ -2,21 +2,63 @@
 // (red header, black corner brackets around the QR, symmetric BE NAYAK +
 // medical cross + extension pill + medical cross + BE NAYAK row, red
 // footer with two icon rows). Rendered by generating an SVG and
-// rasterising with sharp — no Material icon font on the server, so all
-// icons are drawn as inline SVG paths / primitives.
+// rasterising via @resvg/resvg-js. All icons are drawn as inline SVG
+// primitives so no Material icon font needs to ship server-side.
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import QRCode from 'qrcode';
-import sharp from 'sharp';
+import { Resvg } from '@resvg/resvg-js';
 
 const RED = '#E51E25';
 const INK = '#0F1115';
 const WHITE = '#FFFFFF';
 
-// Base coordinate space. Width is sized so "QR 4 EMERGENCY" at Arial
-// Black 42pt fits with breathing room on both sides (measured against
-// libvips's default sans metrics — at 400 the text was overflowing the
-// clipPath, at 460 there's ~15px padding either side). sharp rasterises
-// this at 3× for print-crisp PNGs.
+// ── Fonts ────────────────────────────────────────────────────────────
+//
+// Brand fonts loaded once at module init as file-path lists. resvg-js
+// consumes these directly via `font.fontFiles` — no need to embed the
+// font bytes into the SVG (which libvips/librsvg couldn't parse
+// reliably). resvg reads each file, extracts the family name from the
+// font's own name table, and resolves any `font-family="Poppins"` etc.
+// references in the SVG against those.
+//
+// If the fontsource packages aren't installed, we degrade to system
+// fonts — the sticker still renders, just less on-brand.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const nodeModules = path.resolve(__dirname, '../../node_modules');
+
+function fontPath(rel) {
+  const abs = path.join(nodeModules, rel);
+  if (!fs.existsSync(abs)) throw new Error(`font not found at ${abs}`);
+  return abs;
+}
+
+let FONT_FILES = [];
+let HEADING_FAMILY = 'Arial Black, Arial, Helvetica, sans-serif';
+let BODY_FAMILY = 'Arial, Helvetica, sans-serif';
+let MONO_FAMILY = '"Courier New", Consolas, monospace';
+try {
+  FONT_FILES = [
+    fontPath('@fontsource/poppins/files/poppins-latin-900-normal.woff2'),
+    fontPath('@fontsource/poppins/files/poppins-latin-600-normal.woff2'),
+    fontPath('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2'),
+  ];
+  HEADING_FAMILY = 'Poppins, Arial Black, sans-serif';
+  BODY_FAMILY = 'Poppins, Arial, sans-serif';
+  MONO_FAMILY = '"JetBrains Mono", "Courier New", monospace';
+} catch (e) {
+  console.warn(
+    '[sticker] font packages not found — using system fallback. ' +
+      'Run `npm install` in backend/ to bundle Poppins + JetBrains Mono. ' +
+      `(${e.message})`
+  );
+}
+
+// Base coordinate space. Width is sized so "QR 4 EMERGENCY" at Poppins
+// Black 40pt fits with ~15px of horizontal breathing room. resvg
+// rasterises at 3× (width * 3 on the outer svg) for print-crisp PNGs.
 const W = 460;
 
 /**
@@ -43,30 +85,39 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
   const QR_Y = QR_FRAME_TOP + (QR_FRAME_H - QR_SIZE) / 2;
 
   const AFTER_QR_Y = QR_FRAME_TOP + QR_FRAME_H;
-  const EXT_LABEL_Y = AFTER_QR_Y + 32;
-  const ROW_Y = EXT_LABEL_Y + 18; // top of the extension-row band
-  const ROW_H = 44;
+  const EXT_LABEL_Y = AFTER_QR_Y + 38; // +6 breathing room over previous
+  const ROW_Y = EXT_LABEL_Y + 20;
+  const ROW_H = 46;
 
-  const FOOTER_TOP = ROW_Y + ROW_H + 22;
+  const FOOTER_TOP = ROW_Y + ROW_H + 24;
   const FOOTER_H = 88;
   const H = FOOTER_TOP + FOOTER_H;
 
   // Bracket arm length — bold Ls at every corner of the QR frame.
-  const ARM = 40;
-  const BRACKET_W = 6;
+  // Thicker (8) balances better against the QR modules than 6.
+  const ARM = 42;
+  const BRACKET_W = 8;
 
-  // Medical cross drawn as two overlapping rectangles centred on (cx, cy).
+  // Medical cross — two overlapping bars with a subtle darker underlay
+  // for depth (matches the pill's lifted-off-the-surface feel) and a
+  // faint highlight strip on top so it reads as raised enamel.
   const cross = (cx, cy, size) => {
     const bar = size * 0.32;
     return `
-      <rect x="${cx - bar / 2}" y="${cy - size / 2}" width="${bar}" height="${size}" fill="${RED}"/>
-      <rect x="${cx - size / 2}" y="${cy - bar / 2}" width="${size}" height="${bar}" fill="${RED}"/>
+      <g filter="url(#lift)">
+        <rect x="${cx - bar / 2}" y="${cy - size / 2}" width="${bar}" height="${size}" fill="${RED}"/>
+        <rect x="${cx - size / 2}" y="${cy - bar / 2}" width="${size}" height="${bar}" fill="${RED}"/>
+      </g>
+      <!-- top highlight strip on each arm -->
+      <rect x="${cx - bar / 2 + 0.6}" y="${cy - size / 2 + 0.6}" width="${bar - 1.2}" height="${size * 0.18}" fill="#FFFFFF" opacity="0.20"/>
+      <rect x="${cx - size / 2 + 0.6}" y="${cy - bar / 2 + 0.6}" width="${size - 1.2}" height="${bar * 0.35}" fill="#FFFFFF" opacity="0.16"/>
     `;
   };
 
-  // Extension pill — white box with red text and thin red border.
-  const PILL_W = 140;
-  const PILL_H = 42;
+  // Extension pill — sized to give 5-digit extension numbers room to
+  // breathe. Was 140×42; 150×44 gives ~5px more horizontal padding.
+  const PILL_W = 150;
+  const PILL_H = 44;
   const PILL_X = (W - PILL_W) / 2;
   const PILL_Y = ROW_Y + (ROW_H - PILL_H) / 2;
 
@@ -88,6 +139,38 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <clipPath id="card">
       <rect x="0" y="0" width="${W}" height="${H}" rx="22" ry="22"/>
     </clipPath>
+
+    <!-- Gradients — subtle top-to-bottom variation gives the red bands
+         a curved-plastic-badge feel instead of looking like a flat fill.
+         The header runs light→red→deep, the footer stays a touch darker
+         so the eye reads header as elevated, footer as base. -->
+    <linearGradient id="headerGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#F26066"/>
+      <stop offset="45%"  stop-color="#E51E25"/>
+      <stop offset="100%" stop-color="#B71218"/>
+    </linearGradient>
+    <linearGradient id="footerGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#E51E25"/>
+      <stop offset="100%" stop-color="#A61016"/>
+    </linearGradient>
+    <linearGradient id="pillGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#F04347"/>
+      <stop offset="55%"  stop-color="#E51E25"/>
+      <stop offset="100%" stop-color="#C11821"/>
+    </linearGradient>
+
+    <!-- Soft drop shadow used on lifted elements (crosses, brackets,
+         pill). Kept subtle — anything stronger fights the sticker's
+         printed-vinyl feel. -->
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/>
+      <feOffset dx="0" dy="1.2" result="blur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
 
   <g clip-path="url(#card)">
@@ -95,25 +178,29 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <rect x="0" y="0" width="${W}" height="${H}" fill="${WHITE}"/>
 
     <!-- ── Red header band ─────────────────────────────────── -->
-    <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="${RED}"/>
-    <text x="${W / 2}" y="58" text-anchor="middle"
-          font-family="Arial Black, Arial, Helvetica, sans-serif"
-          font-weight="900" font-size="42" fill="${WHITE}"
+    <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="url(#headerGrad)"/>
+    <!-- Thin glossy highlight just below the top edge — sells the
+         curved-plastic look without needing a full inner-shadow filter. -->
+    <rect x="0" y="0" width="${W}" height="3" fill="#FFFFFF" opacity="0.22"/>
+    <text x="${W / 2}" y="60" text-anchor="middle"
+          font-family="${HEADING_FAMILY}"
+          font-weight="900" font-size="40" fill="${WHITE}"
           letter-spacing="-0.5">
       QR 4 EMERGENCY
     </text>
-    <text x="${W / 2}" y="86" text-anchor="middle"
-          font-family="Arial, Helvetica, sans-serif" font-weight="800"
-          font-size="16" fill="${WHITE}" letter-spacing="2.2">
+    <text x="${W / 2}" y="87" text-anchor="middle"
+          font-family="${BODY_FAMILY}" font-weight="600"
+          font-size="15" fill="${WHITE}" letter-spacing="2.4">
       SCAN TO CALL OWNER
     </text>
 
-    <!-- ── Vehicle number (auto-QR only) ──────────────────── -->
+    <!-- ── Vehicle number (auto-QR only) — uses mono so plate reads
+         cleanly and every character has the same width. ──────────── -->
     ${
       showVehicle
-        ? `<text x="${W / 2}" y="${HEADER_H + 30}" text-anchor="middle"
-              font-family="Arial Black, Arial, sans-serif" font-weight="900"
-              font-size="26" fill="${RED}" letter-spacing="1">
+        ? `<text x="${W / 2}" y="${HEADER_H + 32}" text-anchor="middle"
+              font-family="${MONO_FAMILY}" font-weight="700"
+              font-size="26" fill="${RED}" letter-spacing="1.5">
               ${escapeXml((vehicleNumber || '').toUpperCase())}
             </text>`
         : ''
@@ -126,7 +213,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
            preserveAspectRatio="none"/>
 
     <!-- ── Bold black corner brackets around the QR ─────────── -->
-    <g fill="${INK}">
+    <g fill="${INK}" filter="url(#lift)">
       <!-- top-left: horizontal + vertical arm -->
       <rect x="${QR_FRAME_X}" y="${QR_FRAME_TOP}" width="${ARM}" height="${BRACKET_W}"/>
       <rect x="${QR_FRAME_X}" y="${QR_FRAME_TOP}" width="${BRACKET_W}" height="${ARM}"/>
@@ -143,33 +230,43 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
 
     <!-- ── "Extension Number" label ────────────────────────── -->
     <text x="${W / 2}" y="${EXT_LABEL_Y}" text-anchor="middle"
-          font-family="Arial, Helvetica, sans-serif" font-weight="700"
-          font-size="18" fill="${INK}">
+          font-family="${BODY_FAMILY}" font-weight="600"
+          font-size="17" fill="${INK}" letter-spacing="0.3">
       Extension Number
     </text>
 
     <!-- ── Bottom row: BE NAYAK · cross · pill · cross · BE NAYAK ── -->
     <text x="${leftLabelX}" y="${rowCy + 5}" text-anchor="start"
-          font-family="Arial Black, Arial, sans-serif" font-weight="900"
+          font-family="${HEADING_FAMILY}" font-weight="900"
           font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
     ${cross(leftCrossCx, rowCy, CROSS_SIZE)}
 
-    <!-- White pill with red text + red border -->
-    <rect x="${PILL_X}" y="${PILL_Y}" width="${PILL_W}" height="${PILL_H}"
-          rx="6" ry="6" fill="${WHITE}" stroke="${RED}" stroke-width="1.5"/>
-    <text x="${W / 2}" y="${PILL_Y + 30}" text-anchor="middle"
-          font-family="Arial Black, Arial, sans-serif" font-weight="900"
-          font-size="26" fill="${RED}" letter-spacing="1.5">
+    <!-- Red pill with black digits — gradient + drop shadow so it
+         lifts off the white background like an inlaid enamel plate. -->
+    <g filter="url(#lift)">
+      <rect x="${PILL_X}" y="${PILL_Y}" width="${PILL_W}" height="${PILL_H}"
+            rx="8" ry="8" fill="url(#pillGrad)"
+            stroke="#8E0F16" stroke-width="0.8"/>
+      <!-- Top gloss strip -->
+      <rect x="${PILL_X + 2}" y="${PILL_Y + 2}" width="${PILL_W - 4}" height="${PILL_H * 0.42}"
+            rx="6" ry="6" fill="#FFFFFF" opacity="0.14"/>
+    </g>
+    <text x="${W / 2}" y="${PILL_Y + 32}" text-anchor="middle"
+          font-family="${MONO_FAMILY}" font-weight="700"
+          font-size="26" fill="${INK}" letter-spacing="1.5">
       ${escapeXml(digits || '—')}
     </text>
 
     ${cross(rightCrossCx, rowCy, CROSS_SIZE)}
     <text x="${rightLabelX}" y="${rowCy + 5}" text-anchor="end"
-          font-family="Arial Black, Arial, sans-serif" font-weight="900"
+          font-family="${HEADING_FAMILY}" font-weight="900"
           font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
 
     <!-- ── Red footer with two icon rows ───────────────────── -->
-    <rect x="0" y="${FOOTER_TOP}" width="${W}" height="${FOOTER_H}" fill="${RED}"/>
+    <rect x="0" y="${FOOTER_TOP}" width="${W}" height="${FOOTER_H}" fill="url(#footerGrad)"/>
+    <!-- Subtle top-edge shadow so the footer sits below the white body
+         instead of feeling glued to it. -->
+    <rect x="0" y="${FOOTER_TOP}" width="${W}" height="1.5" fill="#000000" opacity="0.25"/>
 
     <!-- Row 1: globe + website | mail + email -->
     ${footerRow1(FOOTER_TOP + 20)}
@@ -199,12 +296,12 @@ function footerRow1(y) {
   return `
     ${iconGlobe(leftIconX, y - 10, 14, WHITE)}
     <text x="${leftTextX}" y="${y + 2}" text-anchor="start"
-          font-family="Arial, Helvetica, sans-serif" font-weight="700"
+          font-family="${BODY_FAMILY}" font-weight="600"
           font-size="12" fill="${WHITE}">www.qr4emergency.com</text>
 
     ${iconMail(rightIconX, y - 10, 14, WHITE)}
     <text x="${rightTextX}" y="${y + 2}" text-anchor="start"
-          font-family="Arial, Helvetica, sans-serif" font-weight="700"
+          font-family="${BODY_FAMILY}" font-weight="600"
           font-size="12" fill="${WHITE}">${emailText}</text>
   `;
 }
@@ -232,8 +329,8 @@ function footerRow2(y) {
     out += `
       ${c.icon(iconX, y - 12, iconSize, WHITE)}
       <text x="${textX}" y="${y + 2}" text-anchor="start"
-            font-family="Arial, Helvetica, sans-serif" font-weight="800"
-            font-size="14" fill="${WHITE}" letter-spacing="0.4">${c.label}</text>
+            font-family="${HEADING_FAMILY}" font-weight="900"
+            font-size="13" fill="${WHITE}" letter-spacing="0.4">${c.label}</text>
     `;
   }
   for (const dx of dividers) {
@@ -312,7 +409,7 @@ function iconParking(x, y, s, c) {
     <g>
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c}" stroke-width="1.4"/>
       <text x="${cx}" y="${cy + r * 0.7}" text-anchor="middle"
-            font-family="Arial Black, Arial, sans-serif" font-weight="900"
+            font-family="${HEADING_FAMILY}" font-weight="900"
             font-size="${s * 0.75}" fill="${c}">P</text>
     </g>
   `;
@@ -366,5 +463,16 @@ export async function renderStickerPng({
     vehicleNumber,
   });
 
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  // resvg-js reads the SVG, resolves font-family references against the
+  // TTF/WOFF2 files we pass in via `fontFiles`, and rasterizes to PNG in
+  // one shot. Skipping libvips avoids its brittle @font-face parsing.
+  const resvg = new Resvg(svg, {
+    background: WHITE,
+    font: {
+      fontFiles: FONT_FILES,
+      loadSystemFonts: FONT_FILES.length === 0, // only when we have no bundled fonts
+      defaultFontFamily: FONT_FILES.length ? 'Poppins' : 'Arial',
+    },
+  });
+  return resvg.render().asPng();
 }
