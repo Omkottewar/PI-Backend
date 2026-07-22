@@ -65,10 +65,7 @@ export const TEMPLATES = {
   },
   QR_SCAN_ALERT: {
     id: '1077103480001223049',
-    // Same operator-delivery issue as EXPIRY — Exotel accepts, Airtel
-    // never confirms. Alert path falls back to push notifications only
-    // until this is unblocked.
-    disabled: true,
+    disabled: false,
     // {#alp#} = vehicle number
     build: (vehicleNumber) =>
       `QR4Emergency Alert: Someone scanned the Emergency QR of vehicle ${vehicleNumber}. The owner may need your help. Please contact them immediately.`,
