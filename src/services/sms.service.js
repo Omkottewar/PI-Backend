@@ -108,8 +108,31 @@ async function consoleProvider(to, message, { dltTemplateId } = {}) {
 // every send — Airtel/Jio/VI will silently drop SMS missing DltEntityId
 // or a mismatched DltTemplateId, so we fail closed if any credential is
 // missing rather than firing a paid-but-undelivered message.
+// Print a short fingerprint of each credential on first call so we can
+// diff Render vs local without ever logging the full secret. Format:
+// `<first-4>…<last-4>[<length>]` — enough to spot a swap, extra char,
+// or invisible unicode without exposing anything reusable.
+let _fingerprintLogged = false;
+function logCredFingerprint() {
+  if (_fingerprintLogged) return;
+  _fingerprintLogged = true;
+  const fp = (v) => {
+    const s = String(v || '');
+    if (!s) return '<empty>';
+    if (s.length <= 8) return `${s.length} chars`;
+    return `${s.slice(0, 4)}…${s.slice(-4)}[${s.length}]`;
+  };
+  const { sid, apiKey, apiToken, sender, entityId, subdomain } = config.exotel;
+  console.log(
+    `[sms/exotel] cred fingerprint ` +
+      `sid=${fp(sid)} key=${fp(apiKey)} token=${fp(apiToken)} ` +
+      `entity=${fp(entityId)} sender=${sender} subdomain=${subdomain}`
+  );
+}
+
 async function exotelProvider(to, message, { dltTemplateId } = {}) {
   const { sid, apiKey, apiToken, sender, entityId, subdomain } = config.exotel;
+  logCredFingerprint();
   const missing = [];
   if (!sid) missing.push('EXOTEL_SID');
   if (!apiKey) missing.push('EXOTEL_API_KEY');
