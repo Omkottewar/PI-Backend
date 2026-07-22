@@ -102,14 +102,24 @@ export const config = {
   //   sender    — DLT-approved 6-char header e.g. "CPNETW"
   //   entityId  — DLT Principal Entity ID (required by Airtel/Jio/VI)
   //   subdomain — regional API host, "api.in.exotel.com" for India
-  exotel: {
-    sid: (process.env.EXOTEL_SID || '').trim(),
-    apiKey: (process.env.EXOTEL_API_KEY || '').trim(),
-    apiToken: (process.env.EXOTEL_API_TOKEN || '').trim(),
-    sender: (process.env.EXOTEL_SENDER || 'CPNETW').trim(),
-    entityId: (process.env.EXOTEL_DLT_ENTITY_ID || '').trim(),
-    subdomain: (process.env.EXOTEL_SUBDOMAIN || 'api.in.exotel.com').trim(),
-  },
+  //
+  // stripWs() removes ALL whitespace (including internal newlines).
+  // Render's env editor wraps long strings visually; if a value gets
+  // pasted with an accidental newline in the middle, .trim() wouldn't
+  // catch it and HTTP Basic auth would silently fail with 401. Exotel
+  // ids/keys/tokens never legitimately contain whitespace, so stripping
+  // it out defensively is safe.
+  exotel: (() => {
+    const stripWs = (s) => (s || '').replace(/\s+/g, '');
+    return {
+      sid: stripWs(process.env.EXOTEL_SID),
+      apiKey: stripWs(process.env.EXOTEL_API_KEY),
+      apiToken: stripWs(process.env.EXOTEL_API_TOKEN),
+      sender: stripWs(process.env.EXOTEL_SENDER) || 'CPNETW',
+      entityId: stripWs(process.env.EXOTEL_DLT_ENTITY_ID),
+      subdomain: stripWs(process.env.EXOTEL_SUBDOMAIN) || 'api.in.exotel.com',
+    };
+  })(),
 };
 
 export function assertConfig() {
