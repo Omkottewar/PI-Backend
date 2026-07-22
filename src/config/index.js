@@ -93,6 +93,23 @@ export const config = {
   // single-line string in the env var. If unset, push notifications
   // silently no-op (DB rows still land in `notifications`).
   firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+  // Exotel SMS credentials. When SMS_PROVIDER=exotel, all five values
+  // below are required — the send helper fails closed (logs + no send)
+  // if any is missing so we don't fire raw SMS with a broken header.
+  //   sid       — Account SID (Exotel Dashboard → Settings)
+  //   apiKey    — API key used as HTTP Basic username
+  //   apiToken  — API token used as HTTP Basic password
+  //   sender    — DLT-approved 6-char header e.g. "CPNETW"
+  //   entityId  — DLT Principal Entity ID (required by Airtel/Jio/VI)
+  //   subdomain — regional API host, "api.in.exotel.com" for India
+  exotel: {
+    sid: (process.env.EXOTEL_SID || '').trim(),
+    apiKey: (process.env.EXOTEL_API_KEY || '').trim(),
+    apiToken: (process.env.EXOTEL_API_TOKEN || '').trim(),
+    sender: (process.env.EXOTEL_SENDER || 'CPNETW').trim(),
+    entityId: (process.env.EXOTEL_DLT_ENTITY_ID || '').trim(),
+    subdomain: (process.env.EXOTEL_SUBDOMAIN || 'api.in.exotel.com').trim(),
+  },
 };
 
 export function assertConfig() {
@@ -105,8 +122,21 @@ export function assertConfig() {
   // Refuse to boot with the dev-only JWT secret in production — otherwise
   // an env var typo silently signs tokens with a public string and anyone
   // can forge admin tokens.
-  if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-    throw new Error('JWT_SECRET is required in production');
+  if (process.env.NODE_ENV === 'production') {
+    const secret = process.env.JWT_SECRET || '';
+    // Common weak values that would boot without complaint but are
+    // effectively public. Reject any of them, plus anything under 32
+    // characters (well below the strength of an HMAC-SHA256 key).
+    const WEAK = new Set([
+      '', 'dev-only-change-me', 'your-secret-key-change-this',
+      'secret', 'changeme', 'change-me',
+    ]);
+    if (WEAK.has(secret) || secret.length < 32) {
+      throw new Error(
+        'JWT_SECRET is missing or too weak for production. ' +
+          'Set a random ≥32-char string (e.g. `openssl rand -hex 32`).'
+      );
+    }
   }
 
   // Prod-mode escape hatches that must NEVER be active with real users.

@@ -3,7 +3,11 @@ import { randomBytes, randomInt, createHash, timingSafeEqual } from 'crypto';
 import { pool } from '../db/pool.js';
 import { config } from '../config/index.js';
 
-const OTP_TTL_MINUTES = 5;
+// 10 minutes to match the DLT-approved LOGIN_OTP template body
+// ("It is valid for 10 minutes"). Changing this without re-registering
+// the template on DLT would leave users staring at "OTP expired" between
+// minutes 5-10 while the SMS promised 10.
+const OTP_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
 
 export async function findOrCreateUserByMobile(mobile) {
@@ -52,7 +56,7 @@ async function ensureLoginOtpTable(client) {
 }
 
 // Generates a 4-digit OTP, invalidates any prior codes for this mobile,
-// and persists a fresh salted-hash row with a 5-minute TTL. Returns the
+// and persists a fresh salted-hash row with a 10-minute TTL. Returns the
 // PLAIN-TEXT OTP so the caller can pipe it to the SMS transport — never
 // log this or return it to a client.
 export async function issueLoginOtp(mobile) {

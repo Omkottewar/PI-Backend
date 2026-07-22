@@ -1,14 +1,5 @@
 import { pool } from '../db/pool.js';
 import { sendExpiryCountdown } from './sms.service.js';
-import { config } from '../config/index.js';
-
-// Where the mobile app is on the Play Store and where the same activation
-// flow can be finished in a browser. Both surface in the countdown SMS
-// so the user can tap through to renew without hunting for the app.
-const APP_LINK =
-  process.env.APP_STORE_LINK ||
-  'https://play.google.com/store/apps/details?id=com.emergencyalert.emergency_alert';
-const WEB_LINK = () => `${String(config.publicAppUrl || '').replace(/\/$/, '')}/renew`;
 
 export function startExpiryScheduler() {
   const run = async () => {
@@ -72,6 +63,7 @@ export function startExpiryCountdownScheduler() {
       // mobile even if the QR row lacks one.
       const r = await pool.query(`
         SELECT q.id, q.mobile, q.vehicle_number, u.mobile AS user_mobile,
+               (q.date_of_activation + INTERVAL '1 year') AS expiry_at,
                GREATEST(
                  1,
                  EXTRACT(DAY FROM (
@@ -104,14 +96,28 @@ export function startExpiryCountdownScheduler() {
           [row.id, row.days_left]
         );
         if (!claim.rows.length) continue; // already sent
-        await sendExpiryCountdown({
+        const smsResult = await sendExpiryCountdown({
           mobile: to,
-          vehicle_number: row.vehicle_number || 'your vehicle',
           days_left: row.days_left,
-          app_link: APP_LINK,
-          web_link: WEB_LINK(),
+          expiry_date: row.expiry_at,
         });
-        sentCount += 1;
+        if (smsResult && smsResult.ok) {
+          sentCount += 1;
+        } else {
+          // The DLT template can be `disabled: true` while we work out
+          // an operator issue, or the provider itself may return a
+          // transient failure. Either way, release the idempotency
+          // slot so tomorrow's run tries again instead of thinking it
+          // already delivered.
+          await pool
+            .query(
+              `DELETE FROM sms_expiry_log WHERE qr_id = $1 AND days_left = $2`,
+              [row.id, row.days_left]
+            )
+            .catch((e) =>
+              console.error('[Scheduler] failed to release log row:', e.message)
+            );
+        }
       }
       console.log(`[Scheduler] Expiry countdown SMS sent: ${sentCount}`);
     } catch (err) {
