@@ -36,23 +36,23 @@ function fontPath(rel) {
 }
 
 let FONT_FILES = [];
-// Family strings are dropped into `font-family="..."` verbatim, so any
-// multi-word family name has to be wrapped in SINGLE quotes — a bare
-// `"JetBrains Mono"` would close the SVG attribute at its opening `"`
-// and blow the parser up with "expected space not 'J'". Single quotes
-// don't collide with the attribute's outer double quotes.
-let HEADING_FAMILY = "'Arial Black', Arial, Helvetica, sans-serif";
-let BODY_FAMILY = 'Arial, Helvetica, sans-serif';
-let MONO_FAMILY = "'Courier New', Consolas, monospace";
+// resvg-js silently drops every text node when a comma-separated
+// font-family string references any name it can't resolve. So use a
+// single family name per string — bundled Poppins / JetBrains Mono when
+// available, plain Arial otherwise. resvg's `defaultFontFamily` picks
+// up any final fallback.
+let HEADING_FAMILY = 'Arial';
+let BODY_FAMILY = 'Arial';
+let MONO_FAMILY = 'Courier New';
 try {
   FONT_FILES = [
     fontPath('@fontsource/poppins/files/poppins-latin-900-normal.woff2'),
     fontPath('@fontsource/poppins/files/poppins-latin-600-normal.woff2'),
     fontPath('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2'),
   ];
-  HEADING_FAMILY = "Poppins, 'Arial Black', sans-serif";
-  BODY_FAMILY = 'Poppins, Arial, sans-serif';
-  MONO_FAMILY = "'JetBrains Mono', 'Courier New', monospace";
+  HEADING_FAMILY = 'Poppins';
+  BODY_FAMILY = 'Poppins';
+  MONO_FAMILY = 'JetBrains Mono';
 } catch (e) {
   console.warn(
     '[sticker] font packages not found — using system fallback. ' +
@@ -475,7 +475,9 @@ export async function renderStickerPng({
     background: WHITE,
     font: {
       fontFiles: FONT_FILES,
-      loadSystemFonts: FONT_FILES.length === 0, // only when we have no bundled fonts
+      // System fonts loaded too so Render's Alpine image has Arial as
+      // a real fallback if the bundled woff2 fails to load.
+      loadSystemFonts: true,
       defaultFontFamily: FONT_FILES.length ? 'Poppins' : 'Arial',
     },
   });
