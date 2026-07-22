@@ -62,12 +62,18 @@ async function main() {
     case 'scan':
       // sendQrScanned* helpers take a qrId and look up the owner from
       // the DB — inconvenient for an ad-hoc test. Build the message
-      // directly here using the same DLT template.
+      // directly, but honour the same `disabled` flag production paths
+      // use so this script's behaviour matches what the app will do.
       {
         const t = TEMPLATES.QR_SCAN_ALERT;
-        result = await sendSms(mobileArg, t.build('MH12AE0786'), {
-          dltTemplateId: t.id,
-        });
+        if (t.disabled) {
+          console.log(`[sms] skipped disabled template tid=${t.id} to=${mobileArg}`);
+          result = { ok: false, error: 'template_disabled' };
+        } else {
+          result = await sendSms(mobileArg, t.build('MH12AE0786'), {
+            dltTemplateId: t.id,
+          });
+        }
       }
       break;
     case 'expiry':
