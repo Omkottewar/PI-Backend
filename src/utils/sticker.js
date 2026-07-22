@@ -36,18 +36,23 @@ function fontPath(rel) {
 }
 
 let FONT_FILES = [];
-let HEADING_FAMILY = 'Arial Black, Arial, Helvetica, sans-serif';
+// Family strings are dropped into `font-family="..."` verbatim, so any
+// multi-word family name has to be wrapped in SINGLE quotes — a bare
+// `"JetBrains Mono"` would close the SVG attribute at its opening `"`
+// and blow the parser up with "expected space not 'J'". Single quotes
+// don't collide with the attribute's outer double quotes.
+let HEADING_FAMILY = "'Arial Black', Arial, Helvetica, sans-serif";
 let BODY_FAMILY = 'Arial, Helvetica, sans-serif';
-let MONO_FAMILY = '"Courier New", Consolas, monospace';
+let MONO_FAMILY = "'Courier New', Consolas, monospace";
 try {
   FONT_FILES = [
     fontPath('@fontsource/poppins/files/poppins-latin-900-normal.woff2'),
     fontPath('@fontsource/poppins/files/poppins-latin-600-normal.woff2'),
     fontPath('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2'),
   ];
-  HEADING_FAMILY = 'Poppins, Arial Black, sans-serif';
+  HEADING_FAMILY = "Poppins, 'Arial Black', sans-serif";
   BODY_FAMILY = 'Poppins, Arial, sans-serif';
-  MONO_FAMILY = '"JetBrains Mono", "Courier New", monospace';
+  MONO_FAMILY = "'JetBrains Mono', 'Courier New', monospace";
 } catch (e) {
   console.warn(
     '[sticker] font packages not found — using system fallback. ' +
