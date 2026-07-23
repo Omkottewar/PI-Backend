@@ -29,33 +29,37 @@ const WHITE = '#FFFFFF';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeModules = path.resolve(__dirname, '../../node_modules');
 
-function fontPath(rel) {
+function loadFontBuffer(rel) {
   const abs = path.join(nodeModules, rel);
   if (!fs.existsSync(abs)) throw new Error(`font not found at ${abs}`);
-  return abs;
+  return fs.readFileSync(abs);
 }
 
-let FONT_FILES = [];
-// resvg-js silently drops every text node when a comma-separated
-// font-family string references any name it can't resolve. So use a
-// single family name per string — bundled Poppins / JetBrains Mono when
-// available, plain Arial otherwise. resvg's `defaultFontFamily` picks
-// up any final fallback.
+// Load fonts as byte buffers (not file paths) — resvg-js is happier
+// with fontBuffers on Alpine/musl images where the file loader's path
+// resolution is flaky. If a load fails we log loudly and fall back
+// to system fonts so the sticker still renders.
+let FONT_BUFFERS = [];
 let HEADING_FAMILY = 'Arial';
 let BODY_FAMILY = 'Arial';
 let MONO_FAMILY = 'Courier New';
 try {
-  FONT_FILES = [
-    fontPath('@fontsource/poppins/files/poppins-latin-900-normal.woff2'),
-    fontPath('@fontsource/poppins/files/poppins-latin-600-normal.woff2'),
-    fontPath('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2'),
+  FONT_BUFFERS = [
+    loadFontBuffer('@fontsource/poppins/files/poppins-latin-900-normal.woff2'),
+    loadFontBuffer('@fontsource/poppins/files/poppins-latin-600-normal.woff2'),
+    loadFontBuffer('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2'),
   ];
   HEADING_FAMILY = 'Poppins';
   BODY_FAMILY = 'Poppins';
   MONO_FAMILY = 'JetBrains Mono';
+  console.log(
+    `[sticker] bundled fonts loaded: Poppins 900 (${FONT_BUFFERS[0].length}B), ` +
+      `Poppins 600 (${FONT_BUFFERS[1].length}B), ` +
+      `JetBrains Mono 700 (${FONT_BUFFERS[2].length}B)`
+  );
 } catch (e) {
   console.warn(
-    '[sticker] font packages not found — using system fallback. ' +
+    '[sticker] font packages not found — using system Arial. ' +
       'Run `npm install` in backend/ to bundle Poppins + JetBrains Mono. ' +
       `(${e.message})`
   );
@@ -95,7 +99,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
   const ROW_H = 46;
 
   const FOOTER_TOP = ROW_Y + ROW_H + 24;
-  const FOOTER_H = 88;
+  const FOOTER_H = 96; // +8 to fit the larger website/email row 1 text
   const H = FOOTER_TOP + FOOTER_H;
 
   // Bracket arm length — bold Ls at every corner of the QR frame.
@@ -127,15 +131,14 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
   const PILL_Y = ROW_Y + (ROW_H - PILL_H) / 2;
 
   // Bottom row horizontal layout: BE NAYAK ... cross ... pill ... cross ... BE NAYAK
-  // Spacing budget (per side):
-  //   left edge (14) → BE NAYAK label (~80wide at 16pt) → 12px gap →
-  //   cross (28) → 8px gap → pill → 8px gap → cross → 12px gap → BE NAYAK
-  // Adds up cleanly at W=460.
-  const CROSS_SIZE = 28;
-  const leftCrossCx = PILL_X - 20;
-  const rightCrossCx = PILL_X + PILL_W + 20;
-  const leftLabelX = 14;
-  const rightLabelX = W - 14;
+  // Cross size dialled down to 24 so the plus-sign proportionally
+  // matches the pill height (44) — 28 was noticeably taller than the
+  // pill and threw off the visual balance.
+  const CROSS_SIZE = 24;
+  const leftCrossCx = PILL_X - 18;
+  const rightCrossCx = PILL_X + PILL_W + 18;
+  const leftLabelX = 18;
+  const rightLabelX = W - 18;
   const rowCy = ROW_Y + ROW_H / 2;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -243,7 +246,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <!-- ── Bottom row: BE NAYAK · cross · pill · cross · BE NAYAK ── -->
     <text x="${leftLabelX}" y="${rowCy + 5}" text-anchor="start"
           font-family="${HEADING_FAMILY}" font-weight="900"
-          font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
+          font-size="20" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
     ${cross(leftCrossCx, rowCy, CROSS_SIZE)}
 
     <!-- Red pill with black digits — gradient + drop shadow so it
@@ -265,7 +268,7 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     ${cross(rightCrossCx, rowCy, CROSS_SIZE)}
     <text x="${rightLabelX}" y="${rowCy + 5}" text-anchor="end"
           font-family="${HEADING_FAMILY}" font-weight="900"
-          font-size="16" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
+          font-size="20" fill="${INK}" letter-spacing="0.5">BE NAYAK</text>
 
     <!-- ── Red footer with two icon rows ───────────────────── -->
     <rect x="0" y="${FOOTER_TOP}" width="${W}" height="${FOOTER_H}" fill="url(#footerGrad)"/>
@@ -274,11 +277,11 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
     <rect x="0" y="${FOOTER_TOP}" width="${W}" height="1.5" fill="#000000" opacity="0.25"/>
 
     <!-- Row 1: globe + website | mail + email -->
-    ${footerRow1(FOOTER_TOP + 20)}
+    ${footerRow1(FOOTER_TOP + 24)}
 
     <!-- Row 2: warning + ACCIDENT | pin + TRACKING | P + NO PARKING,
          separated by thin white vertical dividers -->
-    ${footerRow2(FOOTER_TOP + 60)}
+    ${footerRow2(FOOTER_TOP + 68)}
   </g>
 </svg>`;
 }
@@ -290,24 +293,24 @@ function buildStickerSvg({ qrPngB64, digits, showVehicle, vehicleNumber }) {
 // its icon just to the left) guarantees "support@qr4emergency.com" fits
 // even at font-size 12 without running off the sticker edge.
 function footerRow1(y) {
-  const leftIconX = 16;
-  const leftTextX = leftIconX + 20;
+  const leftIconX = 14;
+  const leftTextX = leftIconX + 22;
   const emailText = 'support@qr4emergency.com';
-  // Approximate email string width at font-size 12 Arial ≈ 155.
-  // Icon (14) + 6 gap = 20 to the left of the text.
-  const rightTextRight = W - 16;
-  const rightIconX = rightTextRight - 155 - 20;
-  const rightTextX = rightIconX + 20;
+  // At font-size 14, Poppins 700 email string ≈ 194px wide; icon (16)
+  // + 6px gap = 22 to the left of the text.
+  const rightTextRight = W - 14;
+  const rightIconX = rightTextRight - 194 - 22;
+  const rightTextX = rightIconX + 22;
   return `
-    ${iconGlobe(leftIconX, y - 10, 14, WHITE)}
-    <text x="${leftTextX}" y="${y + 2}" text-anchor="start"
-          font-family="${BODY_FAMILY}" font-weight="600"
-          font-size="12" fill="${WHITE}">www.qr4emergency.com</text>
+    ${iconGlobe(leftIconX, y - 11, 16, WHITE)}
+    <text x="${leftTextX}" y="${y + 3}" text-anchor="start"
+          font-family="${BODY_FAMILY}" font-weight="700"
+          font-size="14" fill="${WHITE}">www.qr4emergency.com</text>
 
-    ${iconMail(rightIconX, y - 10, 14, WHITE)}
-    <text x="${rightTextX}" y="${y + 2}" text-anchor="start"
-          font-family="${BODY_FAMILY}" font-weight="600"
-          font-size="12" fill="${WHITE}">${emailText}</text>
+    ${iconMail(rightIconX, y - 11, 16, WHITE)}
+    <text x="${rightTextX}" y="${y + 3}" text-anchor="start"
+          font-family="${BODY_FAMILY}" font-weight="700"
+          font-size="14" fill="${WHITE}">${emailText}</text>
   `;
 }
 
@@ -474,11 +477,12 @@ export async function renderStickerPng({
   const resvg = new Resvg(svg, {
     background: WHITE,
     font: {
-      fontFiles: FONT_FILES,
-      // System fonts loaded too so Render's Alpine image has Arial as
-      // a real fallback if the bundled woff2 fails to load.
+      // Pass raw bytes so path-resolution differences between local
+      // Windows and Render's Alpine image don't matter — the fonts
+      // are already in memory.
+      fontBuffers: FONT_BUFFERS,
       loadSystemFonts: true,
-      defaultFontFamily: FONT_FILES.length ? 'Poppins' : 'Arial',
+      defaultFontFamily: FONT_BUFFERS.length ? 'Poppins' : 'Arial',
     },
   });
   return resvg.render().asPng();
